@@ -30,7 +30,22 @@ DTYPE_BYTES = {
 }
 
 
-def fetch_model_facts(model_id: str, revision: str | None) -> dict:
+def vocab_from_weights(model_id: str, revision: str | None) -> int | None:
+    """Vocabulary size read off the embedding tensor's shape, or None."""
+    from huggingface_hub import get_safetensors_metadata
+
+    try:
+        meta = get_safetensors_metadata(model_id, revision=revision)
+    except Exception:  # noqa: BLE001 - offline, gated, or .bin-only repo
+        return None
+    for fmeta in meta.files_metadata.values():
+        for name, tensor in fmeta.tensors.items():
+            if name.endswith("embed_tokens.weight") and len(tensor.shape) == 2:
+                return int(tensor.shape[0])
+    return None
+
+
+def fetch_model_facts(model_id: str, revision: str | None, vocab_override: int | None = None) -> dict:
     """Parameter count + architecture dims, read from the Hub."""
     from huggingface_hub import HfApi, hf_hub_download
 
@@ -49,7 +64,17 @@ def fetch_model_facts(model_id: str, revision: str | None) -> dict:
     facts["layers"] = (
         text_cfg.get("num_hidden_layers") or text_cfg.get("n_layer") or 32
     )
-    facts["vocab"] = text_cfg.get("vocab_size") or 32000
+    # Multimodal Gemma 3 configs (4b/12b/27b) omit vocab_size entirely and let
+    # transformers supply the default, so a plain .get() falls through to the
+    # fallback and understates the logits term by 8x on the exact model family
+    # this repo targets. Read the embedding row count from the safetensors
+    # header instead - HTTP range requests, no weight download.
+    facts["vocab"] = (
+        vocab_override
+        or text_cfg.get("vocab_size")
+        or vocab_from_weights(model_id, revision)
+        or 32000
+    )
     facts["arch"] = (cfg.get("architectures") or ["?"])[0]
     dtype = str(cfg.get("dtype") or cfg.get("torch_dtype") or "bfloat16").replace("torch.", "")
     facts["dtype"] = dtype
@@ -167,10 +192,12 @@ def main() -> int:
     ap.add_argument("--lora-rank", type=int, default=32)
     ap.add_argument("--gpus", type=int, default=1, help="GPUs for ZeRO-3/FSDP sharding")
     ap.add_argument("--vram", type=float, default=None, help="VRAM per GPU in GB")
+    ap.add_argument("--vocab", type=int, default=None,
+                    help="override vocabulary size when the repo publishes neither")
     ap.add_argument("--no-grad-ckpt", action="store_true", help="disable gradient checkpointing")
     args = ap.parse_args()
 
-    facts = fetch_model_facts(args.model, args.revision)
+    facts = fetch_model_facts(args.model, args.revision, args.vocab)
     ckpt = not args.no_grad_ckpt
     rows = plan(facts, args.batch, args.seq_len, args.lora_rank, ckpt, args.gpus)
 
