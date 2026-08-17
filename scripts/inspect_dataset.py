@@ -24,6 +24,21 @@ from collections import Counter
 MAX_VAL = 400  # chars shown per field in the sample row
 
 
+def _as_messages(value) -> list:
+    """Decode a chat column that may hold serialized JSON instead of a list.
+
+    Stats below must run on decoded rows: iterating a JSON *string* walks
+    characters, so role counting finds no dicts and `len()` returns the string
+    length -- plausible-looking numbers that are silently wrong.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    return value if isinstance(value, list) else []
+
+
 def _short(v, limit: int = MAX_VAL) -> str:
     s = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
     s = s.replace("\n", "\\n")
@@ -216,15 +231,17 @@ def main() -> int:
         if isinstance(first, list) and first and isinstance(first[0], dict):
             print(f"      keys    : {sorted(first[0].keys())}")
     if "messages" in columns and rows[0].get("messages"):
+        decoded = [_as_messages(r.get("messages")) for r in rows]
         roles = Counter()
-        for r in rows[:50]:
-            for m in r.get("messages") or []:
+        for msgs in decoded[:50]:
+            for m in msgs:
                 if isinstance(m, dict) and "role" in m:
                     roles[m["role"]] += 1
         if roles:
             print(f"      roles   : {dict(roles)}")
-        turns = [len(r.get("messages") or []) for r in rows]
-        print(f"      turns   : min={min(turns)} median={sorted(turns)[len(turns)//2]} max={max(turns)}")
+        turns = sorted(len(m) for m in decoded if m)
+        if turns:
+            print(f"      turns   : min={turns[0]} median={turns[len(turns)//2]} max={turns[-1]}")
 
     for i, row in enumerate(rows[: max(0, args.show)]):
         print(f"\nSAMPLE ROW [{i}]")

@@ -28,11 +28,11 @@ Read only the SKILL.md you actually need. Each is self-contained.
 
 ```bash
 # local GPU box
-uv run scripts/train_sft.py --config recipe.yaml
+uv run scripts/train.py --config recipe.yaml
 
 # Hugging Face Jobs (no local GPU needed)
 hf jobs uv run --flavor a10g-large --secrets HF_TOKEN --timeout 6h \
-  scripts/train_sft.py --config recipe.yaml
+  scripts/train.py --config recipe.yaml
 ```
 
 `--config` accepts a local path, an `https://` URL, or a raw JSON string, so the

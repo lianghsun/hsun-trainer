@@ -389,6 +389,37 @@ def make_args(cfg: dict, stage: str, smoke: bool):
     )
 
 
+def pin_single_gpu_if_not_distributed() -> None:
+    """Keep an unlaunched `python train.py` off torch's DataParallel path.
+
+    HF Trainer wraps the model in nn.DataParallel whenever it sees more than
+    one visible GPU and no distributed launcher. DataParallel replicates the
+    module per device, which breaks models holding device-bound buffers:
+    Gemma 3's `embed_scale` stays on cuda:0 while replica 1 feeds it a cuda:1
+    index, raising "Expected all tensors to be on the same device". Multi-GPU
+    is supported, but only via `accelerate launch` / `torchrun` (see
+    references/hardware.md). Must run before torch initialises CUDA.
+    """
+    if any(os.environ.get(v) for v in ("WORLD_SIZE", "RANK", "LOCAL_RANK")):
+        return  # accelerate/torchrun owns device placement
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is not None:
+        return  # caller already chose
+    import subprocess
+
+    try:
+        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True,
+                             text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return
+    count = len([ln for ln in out.stdout.splitlines() if ln.startswith("GPU ")])
+    if count > 1:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+        print(f"    [!] {count} GPUs visible but no distributed launcher; using GPU 0 only.")
+        print("        For multi-GPU: uv run --with accelerate accelerate launch \\")
+        print(f"            --num_processes {count} scripts/train.py --config <recipe>")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="CPT / SFT / DPO trainer")
     ap.add_argument("--config", required=True, help="YAML path, https URL, or raw JSON")
@@ -417,6 +448,8 @@ def main() -> int:
     if args.dry_run:
         print(json.dumps(cfg, indent=2, ensure_ascii=False, default=str))
         return 0
+
+    pin_single_gpu_if_not_distributed()
 
     print("[1/4] dataset")
     train_ds, eval_ds = build_dataset(cfg, args.smoke_test)
