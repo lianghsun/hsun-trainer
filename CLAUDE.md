@@ -76,6 +76,7 @@ Checked by execution against **TRL 1.10 / transformers 5.15** (Aug 2026):
 | `all-linear` on `gemma-3-4b` | targets 401 Linears, 162 in the vision tower |
 | `lianghsun/tw-legal-qa-chat`, `reasoning-base-20k-chat` | `messages` is a **JSON string** → TRL silently trains on 0 rows |
 | `twinkle-ai/fineweb-zhtw-filtered`, `finepdfs-zhtw`, `finetranslations-zhtw` | empty repos, no data files |
+| `gemma-3-4b/12b/27b` `config.json` | omits `vocab_size` — only `gemma-3-270m` publishes it |
 
 Before writing any TRL config argument, confirm it exists:
 
@@ -108,6 +109,39 @@ on Apple Silicon (MPS) in float32 — so the full SFT path is testable on a Mac
 without CUDA. GRPO smoke tests also run there, just slowly.
 
 Gemma repos are gated; `hf auth login` is required even for the 270m model.
+
+### The smoke model is not a representative model
+
+A passing smoke test proves the *pipeline* runs. It does not prove the logic is
+right for the models people actually train, because `gemma-3-270m` differs from
+its larger siblings in ways that hide bugs:
+
+| | `gemma-3-270m` | `gemma-3-4b/12b/27b` |
+|---|---|---|
+| `vocab_size` in config | present | **absent** |
+| architecture | text-only `Gemma3ForCausalLM` | multimodal `Gemma3ForConditionalGeneration` |
+| vision tower | none | ~40% of all Linear layers |
+| single vs multi GPU | whatever you have | usually a multi-GPU host |
+
+This is not hypothetical: a `vocab_size` fallback understated the logits term
+8.2x on every real Gemma, and the documented smoke test could never surface it
+because 270m is the one Gemma that publishes `vocab_size` (#1).
+
+So whenever a change touches **model specifications** — vocabulary, parameter
+counts, module names, device placement, memory math — verify it against a real
+target model too, not just the smoke model. Metadata-only checks are cheap and
+need no GPU:
+
+```bash
+uv run scripts/plan_memory.py --model google/gemma-3-12b-it --seq-len 4096 --vram 80
+uv run --with transformers python -c "
+from transformers import AutoConfig; c=AutoConfig.from_pretrained('google/gemma-3-12b-it')
+print(c.model_type, c.architectures, hasattr(c,'text_config'))"
+```
+
+Likewise, hyperparameters in `recipes/` should be justified against the
+dataset's real length distribution rather than carried over from an example —
+`inspect_dataset.py --tokenizer <model>` prints the percentiles (#2).
 
 ## Conventions
 
