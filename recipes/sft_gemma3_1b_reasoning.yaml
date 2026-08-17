@@ -1,0 +1,61 @@
+# SFT: gemma-3-1b-it on twinkle-ai/tw-reasoning-instruct-50k (zh-TW reasoning).
+#
+# Sized from evidence, not habit:
+#   inspect_dataset.py -> ShareGPT `conversations` (from/value), token p99=1,697
+#   plan_memory.py     -> 1.00B params, vocab 262,144; full FT peaks at 31.6 GB
+#                         on seq 8192, so full fits comfortably on one B200.
+#
+#   uv run scripts/inspect_dataset.py twinkle-ai/tw-reasoning-instruct-50k \
+#       --tokenizer google/gemma-3-1b-it
+#   uv run scripts/plan_memory.py --model google/gemma-3-1b-it --seq-len 8192 --vram 179
+stage: sft
+
+model:
+  name_or_path: google/gemma-3-1b-it
+  dtype: bfloat16
+  attn_implementation: sdpa
+  # gemma-3-1b is Gemma3ForCausalLM (text-only) - no vision tower to freeze.
+  # Stock Gemma templates lack {% generation %}, so assistant_only_loss below
+  # needs this patched copy.
+  chat_template_path: assets/gemma_chat_template_assistant_mask.jinja
+
+dataset:
+  shuffle_seed: 42
+  sources:
+    - path: twinkle-ai/tw-reasoning-instruct-50k
+      split: train
+      sharegpt_to_messages: true      # {"from","value"} -> {"role","content"}
+      sharegpt_column: conversations
+      keep: [messages]
+
+tuning:
+  method: full                        # 1B on 179 GB - no reason to adapt
+
+train:
+  output_dir: outputs/gemma3-1b-tw-reasoning-sft
+  max_length: 2048                    # covers p99=1,697; attention is O(n^2)
+  packing: false                      # keep conversations intact
+  assistant_only_loss: true           # requires the patched template above
+  num_train_epochs: 2
+  # effective batch = 8 per-device x 2 accum x 8 GPUs = 128 sequences
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 2
+  learning_rate: 1.0e-5
+  lr_scheduler_type: cosine
+  warmup_steps: 50
+  bf16: true
+  gradient_checkpointing: true
+  # 262k vocab makes the logits tensor the dominant term; fused chunked CE
+  # keeps it off the peak.
+  use_liger_kernel: true
+  logging_steps: 10
+  # A full-FT checkpoint here is 5.6 GB (2 GB weights + 4 GB Adam state).
+  # For a throwaway experiment set `save_strategy: "no"` - note that train.py
+  # still writes the final model to output_dir either way.
+  save_steps: 500
+  save_total_limit: 1
+
+hub:
+  push_to_hub: false
+  hub_model_id: null
+  private: true
