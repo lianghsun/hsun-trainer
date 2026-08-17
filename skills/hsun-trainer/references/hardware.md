@@ -47,10 +47,21 @@ This is the most common OOM that looks inexplicable.
 
 ## Multi-GPU on your own box
 
+The launcher must run **inside the script's own PEP 723 environment**:
+
 ```bash
-uv run --with accelerate accelerate launch --num_processes 4 \
-    scripts/train.py --config recipes/sft_gemma_zhtw.yaml
+uv sync --script scripts/train.py
+"$(uv python find --script scripts/train.py)" -m accelerate.commands.launch \
+    --num_processes 4 scripts/train.py --config recipes/sft_gemma_zhtw.yaml
 ```
+
+Do **not** use `uv run --with accelerate accelerate launch ...`. That builds an
+environment for the `accelerate` command, never reads `train.py`'s PEP 723
+header, and leaves the spawned ranks importing whatever `datasets` /
+`transformers` happen to be installed system-wide. The failure is obscure - a
+`TypeError` inside `datasets`' feature decoder - and if the system packages are
+merely old rather than broken, the run silently trains against unpinned
+versions. `accelerate>=1.10` is already in the header, so no `--with` is needed.
 
 | Strategy | When | Notes |
 |---|---|---|

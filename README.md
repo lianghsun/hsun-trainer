@@ -57,9 +57,10 @@ HF 官方的 [`huggingface/skills`](https://github.com/huggingface/skills) 很�
 # 本地單卡
 uv run scripts/train.py --config recipes/sft_gemma_zhtw.yaml
 
-# 本地多卡
-uv run --with accelerate accelerate launch --num_processes 4 \
-    scripts/train.py --config recipes/sft_gemma_zhtw.yaml
+# 本地多卡（要從腳本自己的環境啟動，見下方說明）
+uv sync --script scripts/train.py
+"$(uv python find --script scripts/train.py)" -m accelerate.commands.launch \
+    --num_processes 4 scripts/train.py --config recipes/sft_gemma_zhtw.yaml
 
 # Hugging Face Jobs（不需自備 GPU）
 hf jobs uv run --flavor a10g-large --secrets HF_TOKEN --timeout 6h \

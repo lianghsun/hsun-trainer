@@ -23,9 +23,11 @@ raw JSON string.
     uv run scripts/train.py --config recipes/sft_zhtw.yaml --smoke-test
     uv run scripts/train.py --config recipes/sft_zhtw.yaml
 
-    # local, multi GPU
-    uv run --with accelerate accelerate launch --num_processes 4 \
-        scripts/train.py --config recipes/sft_zhtw.yaml
+    # local, multi GPU - the launcher must run inside this script's own PEP 723
+    # environment, or the spawned ranks import system-wide packages instead.
+    uv sync --script scripts/train.py
+    "$(uv python find --script scripts/train.py)" -m accelerate.commands.launch \
+        --num_processes 4 scripts/train.py --config recipes/sft_zhtw.yaml
 
     # Hugging Face Jobs
     hf jobs uv run --flavor a10g-large --secrets HF_TOKEN --timeout 6h \
@@ -416,8 +418,9 @@ def pin_single_gpu_if_not_distributed() -> None:
     if count > 1:
         os.environ["CUDA_VISIBLE_DEVICES"] = "0"
         print(f"    [!] {count} GPUs visible but no distributed launcher; using GPU 0 only.")
-        print("        For multi-GPU: uv run --with accelerate accelerate launch \\")
-        print(f"            --num_processes {count} scripts/train.py --config <recipe>")
+        print('        For multi-GPU: "$(uv python find --script scripts/train.py)" \\')
+        print(f"            -m accelerate.commands.launch --num_processes {count} \\")
+        print("            scripts/train.py --config <recipe>")
 
 
 def main() -> int:
