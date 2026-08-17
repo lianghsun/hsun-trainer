@@ -87,10 +87,25 @@ Extras install per family: `pip install twinkle-eval[math,ifeval,tool]`.
 | `math` | `\boxed{}` plus symbolic equivalence |
 | `regex_match` | free-form reasoning tasks |
 
-If a model scores near zero on multiple choice, the cause is almost always
-**extraction, not knowledge** — the system prompt did not make it emit
-`\boxed{}`. Check `eval_results_*.jsonl` before believing the number, or
-switch to `logit`.
+**Pick the method from the model, not from habit.** `make_eval_config.py`
+defaults to `box`, which is right for a model trained to emit `\boxed{}` and
+wrong for a stock instruct checkpoint. Measured on `gemma-3-1b-it` against
+`lianghsun/tw-legal-benchmark-v1` — same model, same 209 questions, same
+system prompt:
+
+| `--method` | accuracy | unparsed |
+|---|---|---|
+| `box` (default) | 4.78% | 83.7% |
+| `pattern` | 29.67% | 0% |
+
+The model was answering correctly and saying `最終答案：C` instead of
+`\boxed{C}`. Nothing errors — a 6x wrong number is simply reported.
+
+So: if a model scores near zero on multiple choice, the cause is almost always
+**extraction, not knowledge**. Read the `無法解析` percentage twinkle-eval
+prints on every dataset; above ~20% the score measures formatting. Confirm in
+`eval_results_*.jsonl`, then switch to `pattern` (or `logit`, which is
+format-independent but needs a completions endpoint).
 
 ## Trustworthy numbers
 

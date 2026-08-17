@@ -51,6 +51,24 @@ the `-pt` suffix; Gemma 4 base is the unsuffixed id (`google/gemma-4-12B`).
 `packing: true` and `completion_only_loss: false` for `stage: cpt`
 automatically. Do not add system prompts or role markers into the corpus.
 
+**Known limitation: packing cross-contaminates under sdpa.** TRL prints this
+on every CPT run:
+
+> Packing gathers multiple samples into a single sequence, and only the
+> following implementations are known to reliably support this:
+> flash_attention_2, ... Using other implementations may lead to
+> cross-contamination between samples.
+
+Documents packed into one sequence attend across their boundaries, so the
+model learns adjacency that does not exist. There is no free fix here:
+`flash-attn` is excluded on purpose (it compiles for minutes), and
+`kernels-community/flash-attn2` — which TRL lists as supported and which needs
+no local compile — publishes no build variant for B200 / CUDA 13.1 (tested
+2026-08, `FileNotFoundError: Cannot find a build variant for this system`).
+Until a prebuilt kernel exists for your GPU, choose deliberately: keep
+`packing: true` and accept the contamination, or set `packing: false` and pay
+the throughput. Do not leave it undecided.
+
 **Learning rate 5-10x below SFT.** 1e-5 or lower for full fine-tuning. CPT at
 SFT learning rates is the most common way to destroy a base model. Warm up
 over ~100 steps and use a cosine schedule.
