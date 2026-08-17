@@ -1,0 +1,44 @@
+# Tiny end-to-end smoke recipe. gemma-3-270m is text-only, so it loads and
+# steps on Apple Silicon (MPS) or CPU without CUDA.
+#
+#   uv run scripts/train.py --config recipes/smoke_gemma.yaml --smoke-test
+#
+# Use this to validate a new dataset's columns and chat template BEFORE
+# booking a GPU. It runs 5 steps on 64 rows and saves nothing.
+stage: sft
+
+model:
+  name_or_path: google/gemma-3-270m-it
+  dtype: float32                   # MPS/CPU are unreliable in bf16
+  attn_implementation: eager
+  freeze_vision_tower: true
+
+dataset:
+  sources:
+    - path: lianghsun/tw-legal-qa-chat
+      split: train
+      json_columns: [messages]
+      keep: [messages]
+
+tuning:
+  method: lora
+  lora:
+    r: 8
+    alpha: 16
+    dropout: 0.0
+    target_modules: [q_proj, k_proj, v_proj, o_proj]
+
+train:
+  output_dir: outputs/smoke
+  max_length: 1024
+  packing: false
+  assistant_only_loss: false       # stock Gemma template lacks {% generation %}
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 1.0e-5
+  bf16: false
+  gradient_checkpointing: false
+  logging_steps: 1
+
+hub:
+  push_to_hub: false

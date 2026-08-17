@@ -1,0 +1,21 @@
+{
+  "name": "hsun-trainer",
+  "owner": {
+    "name": "Liang Hsun Huang",
+    "url": "https://huggingface.co/lianghsun"
+  },
+  "metadata": {
+    "description": "Traditional Chinese LLM training skills for Claude Code",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "hsun-trainer",
+      "source": "./",
+      "description": "Train LLMs end-to-end from Claude Code: continued pretraining (CPT), SFT, GRPO with Traditional Chinese reward functions, and benchmarking via ai-twinkle/Eval. Runs on a local GPU box or Hugging Face Jobs.",
+      "version": "0.1.0",
+      "category": "machine-learning",
+      "keywords": ["llm", "training", "sft", "grpo", "eval", "zh-tw", "taiwan"]
+    }
+  ]
+}

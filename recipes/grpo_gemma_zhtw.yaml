@@ -1,0 +1,81 @@
+# GRPO / RLVR on Gemma with Traditional Chinese reward shaping.
+#
+# GRPO only works when correctness is machine-checkable. Here the target is
+# math, verified symbolically - plus zh-TW rewards that stop the model drifting
+# into Simplified Chinese or English, which SFT alone rarely fixes.
+#
+# List every available reward:  uv run scripts/train_grpo.py --list-rewards
+# See how they score samples:   uv run scripts/train_grpo.py --test-rewards
+stage: grpo
+
+model:
+  name_or_path: google/gemma-3-4b-it     # start from an instruction-tuned model
+  dtype: bfloat16
+  attn_implementation: sdpa
+  trust_remote_code: false
+
+dataset:
+  sources:
+    - path: twinkle-ai/tw-math-reasoning-2k
+      split: train
+
+grpo:
+  dataset_kind: math                    # chat | mcq | math
+  question_field: problem_zhtw          # the zh-TW rendering of the problem
+  # This dataset's `answer` column holds a full worked solution; the preparer
+  # extracts the final \boxed{...} value as the verifiable target.
+  ground_truth_field: answer
+
+  system_prompt: |
+    你是一位以臺灣正體中文回答的數學助理。請先在 <think> 與 </think> 之間逐步推理，
+    接著給出最終答案，並將最終答案放入 \boxed{} 之中。全程只使用繁體中文。
+
+  rewards:
+    - name: accuracy_math               # the real objective
+      weight: 3.0
+    - name: format_boxed                # makes the answer extractable
+      weight: 0.5
+    - name: format_think                # keeps the reasoning block well-formed
+      weight: 0.5
+    - name: zhtw_purity                 # punishes Simplified Chinese leakage
+      weight: 1.0
+    - name: no_english_drift            # punishes English prose in a zh-TW answer
+      weight: 0.5
+    - name: no_repetition               # guards against degenerate loops
+      weight: 0.3
+
+  num_generations: 8                    # G in GRPO; 8-16 is typical
+  max_completion_length: 1024
+  temperature: 1.0
+  beta: 0.0                             # TRL 1.10 default: KL penalty off
+  loss_type: dapo                       # TRL 1.10 default
+  scale_rewards: group                  # "group" | "batch" | "none" (not a bool)
+  mask_truncated_completions: true      # do not reward answers cut off mid-thought
+  use_vllm: false                       # true + vllm_mode: colocate is much faster
+  vllm_mode: colocate
+  vllm_gpu_memory_utilization: 0.3
+
+tuning:
+  method: lora
+  lora:
+    r: 32
+    alpha: 64
+    dropout: 0.0
+    target_modules: ".*language_model.*(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$"
+
+train:
+  output_dir: outputs/gemma3-4b-zhtw-grpo
+  num_train_epochs: 1
+  per_device_train_batch_size: 8        # must be divisible by num_generations
+  gradient_accumulation_steps: 4
+  learning_rate: 1.0e-6                 # RL wants a much lower LR than SFT
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 20
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 1
+  save_steps: 100
+
+hub:
+  push_to_hub: false
+  hub_model_id: null

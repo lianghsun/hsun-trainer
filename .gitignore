@@ -1,0 +1,24 @@
+# training artifacts
+outputs/
+runs/
+results/
+checkpoints/
+wandb/
+*.safetensors
+*.gguf
+
+# datasets / caches
+datasets/
+.cache/
+.hf_cache/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv/
+
+# local config that may hold tokens
+*.local.yaml
+.env

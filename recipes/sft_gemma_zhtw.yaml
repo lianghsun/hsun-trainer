@@ -1,0 +1,80 @@
+# SFT: teach Gemma zh-TW reasoning + tool use.
+#
+# Gemma family (verified on the Hub):
+#   text-only  : google/gemma-3-270m[-it]  google/gemma-3-1b-pt|-it
+#   multimodal : google/gemma-3-4b-pt|-it  gemma-3-12b-pt|-it  gemma-3-27b-pt|-it
+#   gemma 4    : google/gemma-4-12B[-it]  gemma-4-31B[-it]  gemma-4-26B-A4B[-it] (MoE)
+#                gemma-4-E2B[-it] / E4B[-it]
+#   NOTE the case change: gemma-3 uses "4b/12b", gemma-4 uses "12B/31B".
+#   All Gemma repos are GATED - accept the licence on the model page first.
+#
+# Both sources below ship a `messages` column, verified with:
+#   uv run scripts/inspect_dataset.py twinkle-ai/tw-math-reasoning-2k
+stage: sft
+
+model:
+  name_or_path: google/gemma-3-12b-it
+  dtype: bfloat16
+  attn_implementation: sdpa        # flash_attention_2 needs a prebuilt wheel
+  trust_remote_code: false
+  freeze_vision_tower: true        # text-only SFT on a multimodal checkpoint
+  # Gemma's stock chat template has no {% generation %} marker, so
+  # assistant_only_loss cannot work without this patched copy.
+  chat_template_path: assets/gemma_chat_template_assistant_mask.jinja
+
+dataset:
+  shuffle_seed: 42
+  sources:
+    # ShareGPT layout ({"from","value"}) - converted to `messages` on the fly.
+    - path: twinkle-ai/tw-reasoning-instruct-50k
+      split: train
+      sharegpt_to_messages: true
+      sharegpt_column: conversations
+      keep: [messages]
+      weight: 4.0
+    - path: twinkle-ai/tw-math-reasoning-2k
+      split: train
+      keep: [messages]
+      weight: 1.0
+    - path: twinkle-ai/tw-function-call-reasoning-10k
+      split: train
+      keep: [messages]
+      weight: 2.0
+    - path: lianghsun/tw-legal-qa-chat
+      split: train
+      json_columns: [messages]   # this repo stores messages as a JSON string
+      keep: [messages]
+      weight: 2.0
+
+tuning:
+  method: lora                     # full | lora | qlora
+  lora:
+    r: 32
+    alpha: 64
+    dropout: 0.05
+    # `all-linear` would also adapt the 162 vision-tower Linears in
+    # gemma-3-4b (40% of all Linears) - wasted capacity for text-only work.
+    # This regex keeps the adapter inside the language model.
+    target_modules: ".*language_model.*(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$"
+
+train:
+  output_dir: outputs/gemma3-12b-zhtw-sft
+  max_length: 8192                 # set from inspect_dataset.py token percentiles
+  packing: false                   # keep conversations intact
+  assistant_only_loss: true        # requires the patched template above
+  num_train_epochs: 2
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 1.0e-5
+  lr_scheduler_type: cosine
+  warmup_steps: 20
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 10
+  save_steps: 200
+  save_total_limit: 2
+
+hub:
+  push_to_hub: false
+  hub_model_id: null
+  private: true

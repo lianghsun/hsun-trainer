@@ -1,0 +1,23 @@
+{
+  "name": "hsun-trainer",
+  "version": "0.1.0",
+  "description": "End-to-end LLM training toolkit for Claude Code: continued pretraining, SFT, GRPO, and Traditional Chinese benchmarking with Twinkle Eval. Local GPU or Hugging Face Jobs.",
+  "author": {
+    "name": "Liang Hsun Huang",
+    "url": "https://huggingface.co/lianghsun"
+  },
+  "homepage": "https://github.com/lianghsun/hsun-trainer",
+  "license": "MIT",
+  "keywords": [
+    "llm",
+    "training",
+    "pretrain",
+    "sft",
+    "grpo",
+    "trl",
+    "evaluation",
+    "traditional-chinese",
+    "zh-tw",
+    "taiwan"
+  ]
+}

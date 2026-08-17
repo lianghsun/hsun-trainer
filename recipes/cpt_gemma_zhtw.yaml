@@ -1,0 +1,70 @@
+# Continued pretraining (CPT): inject Traditional Chinese / Taiwan knowledge
+# into a Gemma base model. Raw text only - no chat template at this stage.
+#
+# Mix ratio matters more than total token count. Keep replay data in the mix
+# or the model forgets what it already knew.
+stage: cpt
+
+model:
+  # ALWAYS a base checkpoint for CPT. Gemma base variants:
+  #   google/gemma-3-1b-pt   google/gemma-3-4b-pt
+  #   google/gemma-3-12b-pt  google/gemma-3-27b-pt
+  #   google/gemma-4-12B     google/gemma-4-31B      (no -pt suffix on gemma 4)
+  # Training an -it checkpoint on raw text destroys its instruction following.
+  name_or_path: google/gemma-3-4b-pt
+  dtype: bfloat16
+  attn_implementation: sdpa
+  freeze_vision_tower: true
+
+dataset:
+  shuffle_seed: 42
+  text_field: text
+  sources:
+    # Domain corpus - the knowledge you actually want to add.
+    - path: lianghsun/tw-legal-qa-3M
+      split: train
+      keep: [text]
+      weight: 6.0
+    # Broad zh-TW text - keeps the language distribution natural.
+    - path: lianghsun/tw-news-551M
+      split: train
+      keep: [text]
+      weight: 3.0
+    # Replay - guards against catastrophic forgetting.
+    - path: lianghsun/wikipedia-zh-filtered
+      split: train
+      keep: [text]
+      weight: 1.0
+  # NOTE: lianghsun/Taiwan_c4 has no `train` split - its splits are per-domain
+  # (cy.gov.tw, moj.gov.tw, ...). Name one explicitly if you add it.
+
+tuning:
+  method: full                     # CPT wants full FT; LoRA absorbs little new knowledge
+  lora:
+    r: 128                         # if VRAM forces LoRA, use a high rank
+    alpha: 256
+    dropout: 0.0
+    target_modules: ".*language_model.*(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$"
+    modules_to_save: null          # add [embed_tokens, lm_head] only if you changed the tokenizer
+
+train:
+  output_dir: outputs/gemma3-4b-zhtw-cpt
+  max_length: 4096
+  packing: true                    # essential for CPT throughput
+  num_train_epochs: 1              # one pass; repeated exposure causes memorization
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 32  # large effective batch stabilizes CPT
+  learning_rate: 1.0e-5            # 5-10x below SFT; higher LR wrecks the base model
+  lr_scheduler_type: cosine
+  warmup_steps: 100
+  weight_decay: 0.01
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 20
+  save_steps: 1000
+  save_total_limit: 3
+
+hub:
+  push_to_hub: false
+  hub_model_id: null
+  private: true

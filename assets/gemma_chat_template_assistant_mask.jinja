@@ -1,0 +1,72 @@
+{#-
+  Gemma chat template patched with {% generation %} markers.
+
+  Google's stock Gemma template has no {% generation %} block, so TRL's
+  `assistant_only_loss=True` raises. This version is byte-identical in its
+  rendered output but additionally marks the model turns, which lets
+  apply_chat_template(..., return_assistant_tokens_mask=True) work.
+
+  Use via the recipe:
+      model:
+        chat_template_path: assets/gemma_chat_template_assistant_mask.jinja
+      train:
+        assistant_only_loss: true
+-#}
+{%- macro render_content(content) -%}
+    {%- if content is string -%}
+        {{- content | trim -}}
+    {%- elif content is iterable -%}
+        {%- for item in content -%}
+            {%- if item['type'] == 'image' -%}
+                {{- '<start_of_image>' -}}
+            {%- elif item['type'] == 'text' -%}
+                {{- item['text'] | trim -}}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- else -%}
+        {{- raise_exception("Invalid content type") -}}
+    {%- endif -%}
+{%- endmacro -%}
+{{ bos_token }}
+{%- if messages[0]['role'] == 'system' -%}
+    {%- if messages[0]['content'] is string -%}
+        {%- set first_user_prefix = messages[0]['content'] + '
+
+' -%}
+    {%- else -%}
+        {%- set first_user_prefix = messages[0]['content'][0]['text'] + '
+
+' -%}
+    {%- endif -%}
+    {%- set loop_messages = messages[1:] -%}
+{%- else -%}
+    {%- set first_user_prefix = "" -%}
+    {%- set loop_messages = messages -%}
+{%- endif -%}
+{%- for message in loop_messages -%}
+    {%- if (message['role'] == 'user') != (loop.index0 % 2 == 0) -%}
+        {{ raise_exception("Conversation roles must alternate user/assistant/user/assistant/...") }}
+    {%- endif -%}
+    {%- if (message['role'] == 'assistant') -%}
+        {%- set role = "model" -%}
+    {%- else -%}
+        {%- set role = message['role'] -%}
+    {%- endif -%}
+    {{ '<start_of_turn>' + role + '
+' + (first_user_prefix if loop.first else "") }}
+    {%- if message['role'] == 'assistant' -%}
+        {%- generation -%}
+            {{- render_content(message['content']) -}}
+            {{- '<end_of_turn>
+' -}}
+        {%- endgeneration -%}
+    {%- else -%}
+        {{- render_content(message['content']) -}}
+        {{- '<end_of_turn>
+' -}}
+    {%- endif -%}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{'<start_of_turn>model
+'}}
+{%- endif -%}
