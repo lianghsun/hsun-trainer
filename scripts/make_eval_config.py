@@ -114,7 +114,9 @@ def main() -> int:
                     help=f"twinkle-eval registry names: {', '.join(sorted(BUILTIN))}")
     ap.add_argument("--split", default=None, help="force a split (default: test if present)")
     ap.add_argument("--method", default="box",
-                    help="pattern | box | logit | math | regex_match (default box)")
+                    help="pattern | box | logit | math | regex_match (default box; "
+                         "`box` only suits models trained to emit \\boxed{} - use "
+                         "`pattern` for a stock instruct model)")
     ap.add_argument("--repeat-runs", type=int, default=3,
                     help="repeat count; >1 reports mean +/- stddev (default 3)")
     ap.add_argument("--max-tokens", type=int, default=2048)
@@ -195,6 +197,16 @@ def main() -> int:
     print(f"4. twinkle-eval --dry-run  --config {cfg_path}")
     print(f"5. twinkle-eval --config {cfg_path} --export json csv")
     print("\nInstall if needed: pip install twinkle-eval")
+    if args.method == "box":
+        # A model that answers "最終答案：C" instead of "\boxed{C}" scores zero
+        # under `box`, and the run still reports a number. Measured on
+        # gemma-3-1b-it / tw-legal-benchmark-v1: box 4.78% (83.7% unparsed) vs
+        # pattern 29.67% - same model, same questions.
+        print("\n[!] evaluation_method is `box`, which only scores answers wrapped")
+        print("    in \\boxed{}. Stock instruct models often answer in prose and")
+        print("    score near zero for that reason alone. Check the `無法解析`")
+        print("    percentage twinkle-eval prints; above ~20% the number measures")
+        print("    formatting, not knowledge - re-run with --method pattern.")
     return 0
 
 

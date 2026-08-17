@@ -50,7 +50,13 @@ tuning:
 train:
   output_dir: outputs/gemma3-4b-zhtw-cpt
   max_length: 4096
-  packing: true                    # essential for CPT throughput
+  # Essential for CPT throughput, but note that packing + sdpa lets documents
+  # inside one packed sequence attend across their boundaries. TRL warns about
+  # this on every run; only Flash Attention variants mask it properly, and
+  # flash-attn is deliberately excluded (CLAUDE.md: it compiles for minutes).
+  # `kernels-community/flash-attn2` looks like a way out but ships no build
+  # variant for B200 / CUDA 13.1 (tested 2026-08). See hsun-pretrain SKILL.md.
+  packing: true
   num_train_epochs: 1              # one pass; repeated exposure causes memorization
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 32  # large effective batch stabilizes CPT
