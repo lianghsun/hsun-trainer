@@ -103,6 +103,13 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+SHAREGPT_ROLES = {
+    "human": "user", "user": "user",
+    "gpt": "assistant", "assistant": "assistant", "chatgpt": "assistant",
+    "system": "system",
+}
+
+
 def sources_hint(cfg: dict) -> str:
     srcs = cfg.get("dataset", {}).get("sources") or []
     return srcs[0].get("path", "<dataset>") if srcs else "<dataset>"
@@ -180,16 +187,48 @@ def build_dataset(cfg: dict, smoke: bool):
             ds = ds.map(_decode, desc=f"decoding {', '.join(json_cols)}")
             print(f"      decoded JSON columns: {json_cols}")
 
+        # ShareGPT preference layout: `conversations` holds the prompt while
+        # `chosen`/`rejected` are bare {"from","value"} dicts. TRL accepts
+        # neither, and fails deep inside tokenisation with
+        # "'dict' object has no attribute 'endswith'".
+        if src.get("sharegpt_preference"):
+            prompt_col = src.get("sharegpt_column", "conversations")
+            missing = [c for c in (prompt_col, "chosen", "rejected") if c not in ds.column_names]
+            if missing:
+                raise SystemExit(
+                    f"[x] {path}: sharegpt_preference needs {missing}; have {ds.column_names}"
+                )
+
+            def _to_msgs(value):
+                """Normalise a str / dict / list into a list of chat messages."""
+                if isinstance(value, str):
+                    return [{"role": "assistant", "content": value}]
+                if isinstance(value, dict):
+                    value = [value]
+                return [
+                    {
+                        "role": SHAREGPT_ROLES.get(str(t.get("from", "")).lower(), "assistant"),
+                        "content": t.get("value", ""),
+                    }
+                    for t in (value or [])
+                ]
+
+            def _convert_pref(row, _p=prompt_col):
+                row["prompt"] = _to_msgs(row[_p])
+                row["chosen"] = _to_msgs(row["chosen"])
+                row["rejected"] = _to_msgs(row["rejected"])
+                return row
+
+            ds = ds.map(_convert_pref, desc="sharegpt preference -> prompt/chosen/rejected")
+            print(f"      converted ShareGPT preference (`{prompt_col}` -> `prompt`, "
+                  f"dict chosen/rejected -> message lists)")
+
         # ShareGPT ({"from": "human", "value": ...}) -> OpenAI ({"role", "content"}).
         if src.get("sharegpt_to_messages"):
             col = src.get("sharegpt_column", "conversations")
             if col not in ds.column_names:
                 raise SystemExit(f"[x] {path}: no `{col}` column; have {ds.column_names}")
-            role_map = {
-                "human": "user", "user": "user",
-                "gpt": "assistant", "assistant": "assistant", "chatgpt": "assistant",
-                "system": "system",
-            }
+            role_map = SHAREGPT_ROLES
 
             def _convert(row, _col=col):
                 turns = row[_col]
@@ -426,6 +465,62 @@ def pin_single_gpu_if_not_distributed() -> None:
         print("            scripts/train.py --config <recipe>")
 
 
+
+def assert_cuda_usable() -> None:
+    """Abort if a GPU exists but torch cannot use it.
+
+    uv resolves the newest torch, whose CUDA build can outrun the installed
+    driver (e.g. torch cu130 on a 555 driver capping at CUDA 12.5). torch then
+    reports cuda.is_available() == False and Trainer quietly falls back to CPU:
+    the run completes, the loss curve looks plausible, and it took 100x longer
+    than it should have. Fail loudly instead.
+    """
+    import torch
+
+    if torch.cuda.is_available():
+        return
+    if os.environ.get("HSUN_ALLOW_CPU"):
+        print("    [!] HSUN_ALLOW_CPU set - training on CPU on purpose")
+        return
+    if not sh_has_nvidia_gpu():
+        return  # genuinely no GPU (macOS, CPU box) - nothing to warn about
+
+    driver_cuda = sh_driver_cuda() or "?"
+    raise SystemExit(
+        "[x] nvidia-smi reports a GPU, but torch.cuda.is_available() is False.\n"
+        f"    torch {torch.__version__} was built for CUDA {torch.version.cuda}; "
+        f"this driver supports up to CUDA {driver_cuda}.\n"
+        "    Training would silently run on CPU. Rebuild the environment against\n"
+        "    a matching CUDA build, e.g.:\n"
+        "      UV_INDEX_URL=https://download.pytorch.org/whl/cu124 \\\n"
+        "      UV_EXTRA_INDEX_URL=https://pypi.org/simple \\\n"
+        "      uv run scripts/train.py --config <recipe>\n"
+        "    Set HSUN_ALLOW_CPU=1 to train on CPU anyway."
+    )
+
+
+def sh_has_nvidia_gpu() -> bool:
+    import subprocess
+
+    try:
+        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0 and out.stdout.strip().startswith("GPU ")
+
+
+def sh_driver_cuda() -> str | None:
+    import re as _re
+    import subprocess
+
+    try:
+        out = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = _re.search(r"CUDA Version:\s*([0-9.]+)", out.stdout)
+    return m.group(1) if m else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="CPT / SFT / DPO trainer")
     ap.add_argument("--config", required=True, help="YAML path, https URL, or raw JSON")
@@ -480,6 +575,7 @@ def main() -> int:
     train_ds, eval_ds = build_dataset(cfg, args.smoke_test)
 
     print("[2/4] model")
+    assert_cuda_usable()
     model, tok = build_model_and_tokenizer(cfg)
     peft_cfg = build_peft_config(cfg)
 
