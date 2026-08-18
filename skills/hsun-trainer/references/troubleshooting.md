@@ -63,6 +63,28 @@ In order of cost to quality:
 If OOM happens at a seemingly small model size, it is usually the logits
 tensor, not the weights — see `hardware.md`.
 
+## Disk fills up during training
+
+`save_strategy` and `train.save_final_model` are orthogonal, and each one
+leaves the other's artefact behind. Measured on a 2-step run where
+`save_steps: 500` was never reached:
+
+| `save_final_model` | `save_strategy` | what lands in `output_dir` |
+|---|---|---|
+| `true` (default) | `steps` (default) | end-of-training checkpoint **and** final model |
+| `false` | `steps` | end-of-training checkpoint only |
+| `true` | `"no"` | final model only |
+| `false` | `"no"` | **nothing** |
+
+Trainer writes a checkpoint when training ends even if `save_steps` was never
+hit, so `save_strategy: "no"` is required to suppress it — and it alone does
+not stop the final model. For a throwaway experiment set both. `train.py`
+prints a reminder when only one of the two is set.
+
+A full fine-tune checkpoint carries optimizer state, so it is roughly 3x the
+weight size (a 1B model: ~2 GB weights + ~4 GB Adam state per checkpoint).
+`save_total_limit` caps how many are kept.
+
 ## Gated repo / 401 / 403
 
 All Gemma repos are gated. Accept the licence on the model page, then:

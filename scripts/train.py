@@ -92,6 +92,9 @@ DEFAULTS: dict[str, Any] = {
         "save_strategy": "steps",
         "save_steps": 500,
         "save_total_limit": 2,
+        # save_strategy only governs intermediate checkpoints; this one
+        # governs the final model written at the end of the run.
+        "save_final_model": True,
         "seed": 42,
         "use_liger_kernel": False,
         "report_to": [],
@@ -444,6 +447,25 @@ def main() -> int:
     if stage == "cpt":
         cfg["train"]["completion_only_loss"] = False
 
+    if not cfg["train"]["save_final_model"] and cfg["hub"]["push_to_hub"]:
+        raise SystemExit(
+            "[x] train.save_final_model=false contradicts hub.push_to_hub=true.\n"
+            "    Nothing would exist to push. Set one of them."
+        )
+
+    # These two knobs are orthogonal and each leaves the other's artefact behind:
+    # save_strategy governs checkpoints, save_final_model governs the final model.
+    # Measured on a 2-step run (save_steps=500, never reached): Trainer still
+    # writes an end-of-training checkpoint unless save_strategy is "no".
+    if not cfg["train"]["save_final_model"] and cfg["train"]["save_strategy"] != "no":
+        print(
+            f"    [!] save_final_model=false, but save_strategy="
+            f"{cfg['train']['save_strategy']!r} still writes checkpoints to "
+            f"{cfg['train']['output_dir']}.\n"
+            "        Set train.save_strategy: \"no\" as well for a run that "
+            "writes nothing."
+        )
+
     print("=" * 70)
     print(f"  hsun-trainer :: {stage.upper()}{'  [SMOKE TEST]' if args.smoke_test else ''}")
     print("=" * 70)
@@ -519,9 +541,12 @@ def main() -> int:
         print("\n[ok] Smoke test passed. Re-run without --smoke-test for the real run.")
         return 0
 
-    trainer.save_model(cfg["train"]["output_dir"])
-    tok.save_pretrained(cfg["train"]["output_dir"])
-    print(f"    saved to {cfg['train']['output_dir']}")
+    if cfg["train"]["save_final_model"]:
+        trainer.save_model(cfg["train"]["output_dir"])
+        tok.save_pretrained(cfg["train"]["output_dir"])
+        print(f"    saved to {cfg['train']['output_dir']}")
+    else:
+        print("    train.save_final_model=false -> no final model written")
 
     if cfg["hub"]["push_to_hub"]:
         if not (os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")):

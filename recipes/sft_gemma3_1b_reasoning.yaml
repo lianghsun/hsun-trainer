@@ -50,8 +50,8 @@ train:
   use_liger_kernel: true
   logging_steps: 10
   # A full-FT checkpoint here is 5.6 GB (2 GB weights + 4 GB Adam state).
-  # For a throwaway experiment set `save_strategy: "no"` - note that train.py
-  # still writes the final model to output_dir either way.
+  # For a throwaway run that writes nothing, set BOTH `save_strategy: "no"`
+  # and `save_final_model: false` - either one alone still leaves an artefact.
   save_steps: 500
   save_total_limit: 1
 
