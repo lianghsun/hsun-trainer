@@ -1,0 +1,64 @@
+# DPO: align a zh-TW model on preference pairs.
+#
+# Use DPO when "better" cannot be checked by a program. If it can, GRPO
+# (scripts/train_grpo.py) gives a stronger signal for the same compute.
+#
+# Measured with the gemma-3-1b-it tokenizer over the whole dataset:
+#   rows            108        <- small; see the warning below
+#   prompt          p99   34 tokens
+#   chosen          p99  625
+#   rejected        p99  216
+#   prompt+longer   p99  647   -> max_length 1024 truncates nothing
+stage: dpo
+
+model:
+  name_or_path: google/gemma-3-1b-it     # text-only Gemma; no vision tower
+  dtype: bfloat16
+  attn_implementation: sdpa
+  # DPO scores whole sequences, so assistant_only_loss does not apply and the
+  # stock Gemma template is fine here.
+
+dataset:
+  shuffle_seed: 42
+  sources:
+    # `conversations` is ShareGPT and `chosen`/`rejected` are bare
+    # {"from","value"} dicts. TRL accepts none of those shapes; this flag maps
+    # all three into the explicit-prompt conversational preference format.
+    - path: lianghsun/tw-law-article-qa-DPO
+      split: train
+      sharegpt_preference: true
+      keep: [prompt, chosen, rejected]
+
+tuning:
+  method: lora                           # 108 rows cannot support full FT
+  lora:
+    r: 16                                # small data -> small adapter
+    alpha: 32
+    dropout: 0.05
+    target_modules: [q_proj, k_proj, v_proj, o_proj]
+
+train:
+  output_dir: outputs/gemma3-1b-zhtw-dpo
+  max_length: 1024                       # covers p99=647
+  beta: 0.1                              # KL strength; raise if it drifts
+  num_train_epochs: 1
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8         # effective batch 16
+  learning_rate: 5.0e-6                  # DPO wants far less than SFT
+  lr_scheduler_type: cosine
+  warmup_steps: 5
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 1
+  save_strategy: "no"                    # 6 optimiser steps; nothing to resume
+  save_final_model: true
+
+hub:
+  push_to_hub: false
+  hub_model_id: null
+  private: true
+
+# WARNING: 108 pairs is enough to smoke-test the pipeline, not to move a model.
+# One epoch at this size is ~6 optimiser steps. Treat any eval delta as noise
+# until the set is an order of magnitude larger, and hold out a test split
+# before believing it.

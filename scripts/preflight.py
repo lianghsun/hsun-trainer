@@ -36,28 +36,32 @@ def sh(cmd: list[str], timeout: int = 15) -> str | None:
 
 def detect_gpus() -> dict:
     """Detect NVIDIA GPUs via nvidia-smi, falling back to Apple MPS."""
-    info: dict = {"backend": "cpu", "devices": [], "total_vram_gb": 0.0}
+    info: dict = {"backend": "cpu", "devices": [], "total_vram_gb": 0.0, "free_vram_gb": 0.0}
 
     csv = sh([
         "nvidia-smi",
-        "--query-gpu=name,memory.total,driver_version",
+        "--query-gpu=name,memory.total,memory.free,driver_version",
         "--format=csv,noheader,nounits",
     ])
     if csv:
         info["backend"] = "cuda"
         for line in csv.splitlines():
             parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 2:
+            if len(parts) < 3:
                 continue
             try:
-                vram = float(parts[1]) / 1024.0
+                vram, free = float(parts[1]) / 1024.0, float(parts[2]) / 1024.0
             except ValueError:
                 continue
-            info["devices"].append({"name": parts[0], "vram_gb": round(vram, 1)})
+            info["devices"].append(
+                {"name": parts[0], "vram_gb": round(vram, 1), "free_gb": round(free, 1)}
+            )
             info["total_vram_gb"] += vram
+            info["free_vram_gb"] += free
         info["total_vram_gb"] = round(info["total_vram_gb"], 1)
+        info["free_vram_gb"] = round(info["free_vram_gb"], 1)
         if info["devices"]:
-            info["driver"] = parts[2] if len(parts) > 2 else None
+            info["driver"] = parts[3] if len(parts) > 3 else None
         return info
 
     if platform.system() == "Darwin" and platform.machine() == "arm64":
@@ -139,7 +143,15 @@ def advise(d: dict) -> list[str]:
     vram = gpu["total_vram_gb"]
 
     if gpu["backend"] == "cuda":
-        out.append(f"{OK} CUDA: {n} device(s), {vram} GB total VRAM")
+        free = gpu.get("free_vram_gb", vram)
+        out.append(f"{OK} CUDA: {n} device(s), {free} GB free of {vram} GB total VRAM")
+        # Another process holding VRAM is invisible in the total, and sizing a
+        # run against the total is then an OOM waiting to happen.
+        if vram - free > 1.0:
+            out.append(
+                f"{WARN} {round(vram - free, 1)} GB already in use by another process. "
+                f"Size the run against {free} GB: plan_memory.py --vram {free}"
+            )
         if n > 1:
             out.append(
                 f"{OK} Multi-GPU available -> use accelerate/DeepSpeed ZeRO-3 "
@@ -197,7 +209,8 @@ def main() -> int:
     print(f"python      : {data['python']}")
     print(f"disk free   : {data['disk_free_gb']} GB")
     for dev in data["gpu"]["devices"]:
-        print(f"device      : {dev['name']} ({dev['vram_gb']} GB)")
+        free = f", {dev['free_gb']} GB free" if "free_gb" in dev else ""
+        print(f"device      : {dev['name']} ({dev['vram_gb']} GB{free})")
     if data["packages"]:
         print("ambient pkgs: " + ", ".join(f"{k}=={v}" for k, v in sorted(data["packages"].items())))
     if data["env"]:

@@ -521,6 +521,26 @@ def sh_driver_cuda() -> str | None:
     return m.group(1) if m else None
 
 
+def report_peak_vram(cfg: dict) -> None:
+    """Print measured peak VRAM so plan_memory.py can be calibrated against it."""
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return
+        peak = torch.cuda.max_memory_allocated() / 1024**3
+        reserved = torch.cuda.max_memory_reserved() / 1024**3
+    except Exception:  # noqa: BLE001
+        return
+    t = cfg["train"]
+    print(f"    peak VRAM: {peak:.1f} GB allocated, {reserved:.1f} GB reserved")
+    print(
+        f"    compare:   uv run scripts/plan_memory.py --model "
+        f"{cfg['model']['name_or_path']} --seq-len {t['max_length']} "
+        f"--batch {t['per_device_train_batch_size']}"
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="CPT / SFT / DPO trainer")
     ap.add_argument("--config", required=True, help="YAML path, https URL, or raw JSON")
@@ -632,6 +652,7 @@ def main() -> int:
     print("[4/4] train")
     result = trainer.train()
     print(f"    loss={result.training_loss:.4f}  steps={result.global_step}")
+    report_peak_vram(cfg)
 
     if args.smoke_test:
         print("\n[ok] Smoke test passed. Re-run without --smoke-test for the real run.")

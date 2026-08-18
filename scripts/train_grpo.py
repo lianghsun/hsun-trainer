@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import sys
 import unicodedata
@@ -436,6 +437,62 @@ def build_rewards(cfg: dict) -> tuple[list[Callable], list[float]]:
     return funcs, weights
 
 
+
+def assert_cuda_usable() -> None:
+    """Abort if a GPU exists but torch cannot use it.
+
+    uv resolves the newest torch, whose CUDA build can outrun the installed
+    driver (e.g. torch cu130 on a 555 driver capping at CUDA 12.5). torch then
+    reports cuda.is_available() == False and Trainer quietly falls back to CPU:
+    the run completes, the loss curve looks plausible, and it took 100x longer
+    than it should have. Fail loudly instead.
+    """
+    import torch
+
+    if torch.cuda.is_available():
+        return
+    if os.environ.get("HSUN_ALLOW_CPU"):
+        print("    [!] HSUN_ALLOW_CPU set - training on CPU on purpose")
+        return
+    if not sh_has_nvidia_gpu():
+        return  # genuinely no GPU (macOS, CPU box) - nothing to warn about
+
+    driver_cuda = sh_driver_cuda() or "?"
+    raise SystemExit(
+        "[x] nvidia-smi reports a GPU, but torch.cuda.is_available() is False.\n"
+        f"    torch {torch.__version__} was built for CUDA {torch.version.cuda}; "
+        f"this driver supports up to CUDA {driver_cuda}.\n"
+        "    Training would silently run on CPU. Rebuild the environment against\n"
+        "    a matching CUDA build, e.g.:\n"
+        "      UV_INDEX_URL=https://download.pytorch.org/whl/cu124 \\\n"
+        "      UV_EXTRA_INDEX_URL=https://pypi.org/simple \\\n"
+        "      uv run scripts/train_grpo.py --config <recipe>\n"
+        "    Set HSUN_ALLOW_CPU=1 to train on CPU anyway."
+    )
+
+
+def sh_has_nvidia_gpu() -> bool:
+    import subprocess
+
+    try:
+        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0 and out.stdout.strip().startswith("GPU ")
+
+
+def sh_driver_cuda() -> str | None:
+    import re as _re
+    import subprocess
+
+    try:
+        out = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = _re.search(r"CUDA Version:\s*([0-9.]+)", out.stdout)
+    return m.group(1) if m else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="GRPO trainer with zh-TW rewards")
     ap.add_argument("--config", help="YAML path, https URL, or raw JSON")
@@ -487,6 +544,7 @@ def main() -> int:
     reward_funcs, reward_weights = build_rewards(cfg)
 
     print("[3/4] model")
+    assert_cuda_usable()
     mc, t, g = cfg["model"], cfg["train"], cfg["grpo"]
     dtype = getattr(torch, mc.get("dtype", "bfloat16"))
     model = AutoModelForCausalLM.from_pretrained(
