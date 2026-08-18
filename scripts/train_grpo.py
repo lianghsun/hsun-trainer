@@ -355,8 +355,10 @@ def prepare_dataset(cfg: dict, smoke: bool):
                     {"role": "user", "content": str(row[q_field])},
                 ],
                 # Many datasets put a full worked solution in the answer field;
-                # the verifiable target is what sits inside \boxed{}.
-                "ground_truth": (boxed[-1] if boxed else str(gt)).strip(),
+                # the verifiable target is what sits inside \boxed{}. Rows with
+                # no \boxed{} are dropped below rather than silently turning the
+                # whole solution text into the target.
+                "ground_truth": (boxed[-1].strip() if boxed else ""),
             }
 
     else:  # chat
@@ -370,6 +372,20 @@ def prepare_dataset(cfg: dict, smoke: bool):
             }
 
     ds = ds.map(to_prompt, remove_columns=ds.column_names, desc="building prompts")
+
+    # A prompt whose target cannot be verified earns the same reward for every
+    # generation, so its group advantage is zero: it consumes num_generations
+    # rollouts and teaches nothing. Drop these instead of paying for them.
+    before = len(ds)
+    ds = ds.filter(lambda r: bool(r["ground_truth"]), desc="dropping unverifiable rows")
+    if len(ds) < before:
+        print(f"    dropped {before - len(ds):,}/{before:,} rows with no extractable "
+              f"ground_truth ({gt_field} had no \\boxed{{}})")
+    if len(ds) == 0:
+        raise SystemExit(
+            f"[x] No verifiable rows left. Check grpo.ground_truth_field "
+            f"({gt_field!r}) and grpo.dataset_kind ({kind!r})."
+        )
     print(f"    example prompt: {ds[0]['prompt'][-1]['content'][:160]}...")
     print(f"    example ground_truth: {ds[0]['ground_truth'][:80]!r}")
     return ds
