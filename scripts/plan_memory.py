@@ -75,6 +75,12 @@ def fetch_model_facts(model_id: str, revision: str | None, vocab_override: int |
         or vocab_from_weights(model_id, revision)
         or 32000
     )
+    # Needed for an exact LoRA parameter count: the MLP projections are far
+    # wider than hidden, and GQA makes k/v narrower than q.
+    facts["intermediate"] = text_cfg.get("intermediate_size") or 4 * facts["hidden"]
+    facts["heads"] = text_cfg.get("num_attention_heads") or 32
+    facts["kv_heads"] = text_cfg.get("num_key_value_heads") or facts["heads"]
+    facts["head_dim"] = text_cfg.get("head_dim") or (facts["hidden"] // facts["heads"])
     facts["arch"] = (cfg.get("architectures") or ["?"])[0]
     dtype = str(cfg.get("dtype") or cfg.get("torch_dtype") or "bfloat16").replace("torch.", "")
     facts["dtype"] = dtype
@@ -114,10 +120,24 @@ def fetch_model_facts(model_id: str, revision: str | None, vocab_override: int |
 
 
 def lora_params(facts: dict, rank: int) -> float:
-    """Trainable parameters for LoRA on all linear projections."""
+    """Trainable parameters for LoRA over all linear projections.
+
+    Each adapted Linear(in, out) adds rank * (in + out). Treating every
+    projection as hidden x hidden undercounts by ~2x, because gate/up/down run
+    at intermediate_size while GQA shrinks k/v.
+    """
     h, l = facts["hidden"], facts["layers"]
-    # 7 projections per block (q,k,v,o + gate,up,down), each contributing r*(in+out).
-    return l * 7 * rank * 2 * h
+    inter, kv = facts["intermediate"], facts["kv_heads"]
+    q_out = facts["heads"] * facts["head_dim"]
+    kv_out = kv * facts["head_dim"]
+    per_layer = rank * (
+        (h + q_out)          # q_proj
+        + 2 * (h + kv_out)   # k_proj, v_proj
+        + (q_out + h)        # o_proj
+        + 2 * (h + inter)    # gate_proj, up_proj
+        + (inter + h)        # down_proj
+    )
+    return l * per_layer
 
 
 def activations(facts: dict, batch: int, seq: int, ckpt: bool) -> float:
