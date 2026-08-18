@@ -48,6 +48,46 @@ model:
 
 That template renders byte-identical text to Google's and marks model turns.
 
+## Training runs on CPU on a machine that has a GPU
+
+`uv` resolves the newest torch, and its default build targets the newest CUDA.
+On an older driver that build cannot initialise, `torch.cuda.is_available()`
+returns False, and Trainer quietly falls back to CPU — the run completes, the
+loss curve looks fine, and it took orders of magnitude longer than it should.
+
+Measured on an RTX 3090 with driver 555.42.06 (CUDA 12.5): uv installed
+`torch 2.13.0+cu130`, CUDA was unavailable, and nothing errored.
+
+`train.py` and `train_grpo.py` now abort instead. To fix it, patch the
+script's own environment — **index flags do not work here**, because an
+explicit index outranks `--default-index` and PyPI keeps winning the resolve:
+
+```bash
+uv pip install --python "$(uv python find --script scripts/train.py)" \
+    --reinstall-package torch \
+    --index-url https://download.pytorch.org/whl/cu126 \
+    'torch==2.13.0+cu126'
+
+"$(uv python find --script scripts/train.py)" scripts/train.py --config <recipe>
+```
+
+Pick the tag from `nvidia-smi`: CUDA 12.x needs `cu126`, 13.x needs `cu130`.
+CUDA has minor-version compatibility, so a cu126 build runs on any 12.x driver;
+crossing a major version (12 -> 13) does not work.
+
+Things that look like they should help but do not:
+
+| Attempt | Result |
+|---|---|
+| `UV_INDEX_URL` / `UV_EXTRA_INDEX_URL` env vars | ignored by `uv sync --script` |
+| `--index-url` / `--default-index` on `uv run`/`uv sync` | PyPI still wins |
+| `--index-strategy unsafe-best-match` | picks the *newest* build, i.e. the wrong one |
+| `--torch-backend=auto` | only on `uv pip install`; sees 2.13.0 satisfied and no-ops |
+
+Upgrading the driver is the real fix; the above is a per-machine workaround
+that must be re-applied whenever the script environment is rebuilt.
+`HSUN_ALLOW_CPU=1` forces CPU training if that is genuinely what you want.
+
 ## Out of memory
 
 In order of cost to quality:

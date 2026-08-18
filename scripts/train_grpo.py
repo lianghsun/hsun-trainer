@@ -458,16 +458,25 @@ def assert_cuda_usable() -> None:
         return  # genuinely no GPU (macOS, CPU box) - nothing to warn about
 
     driver_cuda = sh_driver_cuda() or "?"
+    base_ver = torch.__version__.split("+")[0]
     raise SystemExit(
         "[x] nvidia-smi reports a GPU, but torch.cuda.is_available() is False.\n"
         f"    torch {torch.__version__} was built for CUDA {torch.version.cuda}; "
         f"this driver supports up to CUDA {driver_cuda}.\n"
-        "    Training would silently run on CPU. Rebuild the environment against\n"
-        "    a matching CUDA build, e.g.:\n"
-        "      UV_INDEX_URL=https://download.pytorch.org/whl/cu124 \\\n"
-        "      UV_EXTRA_INDEX_URL=https://pypi.org/simple \\\n"
-        "      uv run scripts/train_grpo.py --config <recipe>\n"
-        "    Set HSUN_ALLOW_CPU=1 to train on CPU anyway."
+        "    Training would silently run on CPU.\n"
+        "\n"
+        "    Install a torch built for a CUDA your driver supports. Index flags on\n"
+        "    `uv run`/`uv sync` do NOT work here - PyPI keeps winning the resolve -\n"
+        "    so patch the script's own environment instead:\n"
+        "      uv pip install --python \"$(uv python find --script scripts/train_grpo.py)\" \\\n"
+        "        --reinstall-package torch \\\n"
+        "        --index-url https://download.pytorch.org/whl/cu126 \\\n"
+        f"        'torch=={base_ver}+cu126'\n"
+        "    then run via that interpreter:\n"
+        "      \"$(uv python find --script scripts/train_grpo.py)\" scripts/train_grpo.py --config <recipe>\n"
+        "\n"
+        "    Pick the cu tag from `nvidia-smi` (CUDA 12.x -> cu126, 13.x -> cu130).\n"
+        "    Upgrading the driver is the real fix. HSUN_ALLOW_CPU=1 forces CPU."
     )
 
 
