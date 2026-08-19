@@ -39,6 +39,25 @@ banner() {
   printf "${D}  scripted replay · every command below really runs${R}\n"
 }
 
+# Training stages are run back to back, and a python process that has exited its
+# main loop can still hold VRAM for a moment. Waiting is cheaper than an OOM
+# three seconds into the next stage - which is exactly how this was found.
+wait_for_gpu() {
+  local need=${1:-11000} free i
+  for i in $(seq 1 30); do
+    free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1)
+    [ -z "$free" ] && return 0
+    [ "$free" -ge "$need" ] && return 0
+    [ "$i" = 1 ] && printf "     ${GREY}等待前一個行程釋放 VRAM${R}"
+    printf "."
+    sleep 2
+  done
+  printf "\n"
+  warn "VRAM 仍不足（${free} MiB）。檢查殘留行程："
+  nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv 2>/dev/null | sed "s/^/     /"
+  return 1
+}
+
 # step "narration"  -- what this step is for, in the speaker's words
 step() { printf "\n${ORANGE}⏺${R} ${B}%s${R}\n" "$1"; pause 0.7; }
 
@@ -64,6 +83,7 @@ done_banner() {
 STAGE_OK=0
 run_stage() {
   local label="$1"; shift
+  wait_for_gpu 11000
   printf "  ${D}⎿${R}  ${BLUE}%s${R}\n\n" "$label"
   set -o pipefail
   "$@" 2>&1 \
