@@ -34,19 +34,30 @@
 | `hsun-grpo` | GRPO / RLVR，含**繁體中文 reward 函數庫** |
 | `hsun-eval` | 用 Twinkle Eval 跑 TMMLU+ / Formosa-bench 等評測 |
 
-## 為什麼不用 Hugging Face 官方的 skills
+## 跟 Hugging Face 官方 skills 的關係
 
-HF 官方的 [`huggingface/skills`](https://github.com/huggingface/skills) 很完整，
-建議一起安裝。但它的 `huggingface-llm-trainer` **只做 SFT/DPO/GRPO 且只跑 HF Jobs**，
-不涵蓋以下這些，正是本專案補上的部分：
+HF 官方的 [`huggingface/skills`](https://github.com/huggingface/skills) 有 25 個 skill、
+超過 10,000 stars，**建議一起裝**。它們涵蓋的訓練方法比本專案多，
+生態整合（Hub、Spaces、Trackio、GGUF 匯出）也遠更完整。
+
+以下比較基於 2026-08-18 的 `huggingface/skills`（26 個 SKILL.md 全數檢查）：
 
 | | HF 官方 | hsun-trainer |
 |---|---|---|
-| 繼續預訓練 (CPT) | 不支援 | 支援，含混合比例與遺忘防治 |
-| 本地 / 自有多卡 | 不支援 | `accelerate` / ZeRO-3 / FSDP |
+| 繼續預訓練 (CPT / DAPT) | **完全沒有**（26 個 skill 零命中） | 有，含混合比例與遺忘防治 |
 | 繁體中文評測 | 無 | TMMLU+、Formosa-bench、tw-legal-benchmark |
-| 繁中 reward 函數 | 無 | 簡體字洩漏、英文漂移偵測 |
-| zh-TW 資料集目錄 | 無 | 90+ 個已驗證 schema 的資料集 |
+| 繁中 GRPO reward | 無（官方未提供任何 reward 函數） | 簡體字洩漏、英文漂移偵測 |
+| zh-TW 資料集目錄 | 無 | 41 個已實際載入驗證 schema |
+| 評測是否接進訓練流程 | 拆成獨立 skill，需手動銜接 | CPT→SFT→GRPO→Eval 同一條路由 |
+| 同一份設定跑本地與雲端 | 分屬兩個 skill，設定不共用 | 同一份 recipe、同一支腳本 |
+| 本地多卡 | **有**（`trl-training`，2026-06 新增，ZeRO/FSDP） | 有 |
+| SFT / DPO / GRPO | 有 | 有 |
+| KTO / RLOO / reward modeling | **有** | 無 |
+| Unsloth 後端（更省 VRAM） | **有** | 無，僅 TRL |
+| GGUF 匯出、成本估算、實驗追蹤 | **有** | 無 |
+
+簡單說：**HF 假設你沒有 GPU，本專案假設你有**，而且假設你在做繁體中文。
+兩者是互補而非替代——需要更多後訓練方法、Unsloth 或部署路徑時，用官方那套。
 
 ## 設計重點
 
