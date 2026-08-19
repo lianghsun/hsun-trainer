@@ -1,3 +1,5 @@
+<img src="assets/banner.svg" alt="hsun-trainer — 在 Claude Code 裡訓練繁體中文 LLM" width="100%">
+
 # hsun-trainer
 
 在 Claude Code 裡完成 LLM 訓練全流程的 skill plugin：

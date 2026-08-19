@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="hsun-trainer — 在 Claude Code 裡訓練繁體中文 LLM">
+  <defs>
+    <style>
+      .sans { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    </style>
+    <linearGradient id="rail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"    stop-color="#4B3BE8" stop-opacity=".15"/>
+      <stop offset=".45"  stop-color="#8B7CFF" stop-opacity=".85"/>
+      <stop offset="1"    stop-color="#4FCFA0" stop-opacity=".85"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="300" fill="#12141C"/>
+  <rect x="0" y="0" width="1200" height="3" fill="url(#rail)"/>
+
+  <!-- wordmark -->
+  <text class="mono" x="72" y="108" font-size="46" font-weight="700" fill="#E9EAF1" letter-spacing="-1">hsun-trainer</text>
+  <text class="sans" x="72" y="146" font-size="19" fill="#8B90A4">在 Claude Code 裡訓練繁體中文 LLM</text>
+
+  <!-- pipeline -->
+  <g class="mono" font-size="15" letter-spacing="1.5">
+    <g transform="translate(72 196)">
+      <rect width="96" height="34" rx="4" fill="#1F2330" stroke="#2A2F3D"/>
+      <text x="48" y="22" fill="#C0C4D2" text-anchor="middle">CPT</text>
+    </g>
+    <text x="180" y="218" fill="#4B4F63" font-size="14">→</text>
+    <g transform="translate(204 196)">
+      <rect width="96" height="34" rx="4" fill="#1F2330" stroke="#2A2F3D"/>
+      <text x="48" y="22" fill="#C0C4D2" text-anchor="middle">SFT</text>
+    </g>
+    <text x="312" y="218" fill="#4B4F63" font-size="14">→</text>
+    <g transform="translate(336 196)">
+      <rect width="96" height="34" rx="4" fill="#1F2330" stroke="#2A2F3D"/>
+      <text x="48" y="22" fill="#C0C4D2" text-anchor="middle">GRPO</text>
+    </g>
+    <text x="444" y="218" fill="#4B4F63" font-size="14">→</text>
+    <g transform="translate(468 196)">
+      <rect width="96" height="34" rx="4" fill="#241F4A" stroke="#4B3BE8"/>
+      <text x="48" y="22" fill="#9385FF" text-anchor="middle">EVAL</text>
+    </g>
+  </g>
+
+  <!-- verification stamp -->
+  <g transform="translate(1010 96)">
+    <circle cx="0" cy="0" r="58" fill="none" stroke="#4B3BE8" stroke-width="2" opacity=".55"/>
+    <circle cx="0" cy="0" r="49" fill="none" stroke="#4B3BE8" stroke-width="1" opacity=".3"/>
+    <path d="M -20 2 L -7 16 L 21 -14" fill="none" stroke="#4FCFA0" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text class="sans" x="1010" y="196" font-size="15" fill="#8B90A4" text-anchor="middle">可驗證的產出</text>
+  <text class="sans" x="1010" y="218" font-size="15" fill="#8B90A4" text-anchor="middle">才算產出</text>
+
+  <!-- footer -->
+  <text class="mono" x="72" y="266" font-size="13" fill="#5A5F73">TRL · Twinkle Eval · TMMLU+ · Formosa-bench · 41 zh-TW datasets · MIT</text>
+</svg>
