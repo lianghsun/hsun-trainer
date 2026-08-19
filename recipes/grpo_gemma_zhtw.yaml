@@ -45,7 +45,11 @@ grpo:
       weight: 0.3
 
   num_generations: 8                    # G in GRPO; 8-16 is typical
-  max_completion_length: 1024
+  # Sized from the data, not from habit: this dataset's reference answers run
+  # p50 ~1.2K / p99 ~4.7K tokens. Measured clipped_ratio on gemma-3-1b is 1.0 at
+  # 256, 384 AND 1024 - every completion truncated, all of them masked, zero
+  # gradient. 3072 leaves ~5% clipped. train_grpo.py now aborts if this is wrong.
+  max_completion_length: 3072
   temperature: 1.0
   beta: 0.0                             # TRL 1.10 default: KL penalty off
   loss_type: dapo                       # TRL 1.10 default

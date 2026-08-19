@@ -741,9 +741,16 @@ def main() -> int:
         processing_class=tok,
         peft_config=peft_cfg,
     )
-    trainer.add_callback(make_clipped_ratio_guard())
+    clip_guard = make_clipped_ratio_guard()
+    trainer.add_callback(clip_guard)
     result = trainer.train()
     print(f"    loss={result.training_loss:.4f}  steps={result.global_step}")
+
+    # A run that learned nothing must not exit 0, or every wrapper above it -
+    # progress tables, CI, shell `&&` chains - reads it as a success.
+    if getattr(clip_guard, "fired", False):
+        print("[x] Aborted: no gradient flowed. Fix max_completion_length and re-run.")
+        return 1
 
     if args.smoke_test:
         print("\n[ok] Smoke test passed. Re-run without --smoke-test.")

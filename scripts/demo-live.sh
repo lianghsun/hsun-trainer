@@ -81,6 +81,8 @@ SFT_CFG='{"stage":"sft","model":{"name_or_path":"google/gemma-3-1b-it","dtype":"
 GRPO_CFG='{"stage":"grpo","model":{"name_or_path":"google/gemma-3-1b-it","dtype":"bfloat16","attn_implementation":"sdpa"},
  "dataset":{"sources":[{"path":"twinkle-ai/tw-math-reasoning-2k","split":"train","max_samples":64}]},
  "grpo":{"dataset_kind":"math","question_field":"problem_zhtw","ground_truth_field":"answer",
+   # 256 is deliberately too small: it makes the clipped-ratio guard fire, which
+   # is the point of this stage. Raise to 3072 to watch GRPO actually train.
    "num_generations":4,"max_completion_length":256,
    "rewards":[{"name":"accuracy_math","weight":3.0},{"name":"format_boxed","weight":0.5},{"name":"zhtw_purity","weight":1.0}]},
  "tuning":{"method":"lora","lora":{"r":16,"alpha":32,"dropout":0.0,"target_modules":"all-linear"}},
