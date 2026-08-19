@@ -403,14 +403,74 @@ def load_config(spec: str) -> dict:
 
     text = spec.strip()
     if text.startswith("{"):
-        return json.loads(text)
+        return coerce_numeric(json.loads(text))
     if text.startswith(("http://", "https://")):
         import urllib.request
 
         with urllib.request.urlopen(text, timeout=60) as r:  # noqa: S310
-            return yaml.safe_load(r.read().decode("utf-8"))
+            return coerce_numeric(yaml.safe_load(r.read().decode("utf-8")))
     with open(text, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return coerce_numeric(yaml.safe_load(fh))
+
+
+
+# (dotted path, caster). `[]` walks a list. YAML 1.1's float resolver only
+# matches exponent notation when it carries a decimal point, so `1e-5` loads as
+# the string "1e-5" while `1.0e-5` loads as a float. That string survives the
+# merge untouched and only fails ~90 seconds later inside the optimizer, with a
+# traceback that never mentions config parsing. JSON has no such quirk, so the
+# same bytes behave differently depending on whether --config was a file or a
+# raw JSON string. Coerce here instead, and name the offending key.
+NUMERIC_FIELDS: list[tuple[str, type]] = [
+    ("train.learning_rate", float), ("train.weight_decay", float),
+    ("train.num_train_epochs", float), ("train.beta", float),
+    ("train.max_length", int), ("train.max_steps", int), ("train.warmup_steps", int),
+    ("train.per_device_train_batch_size", int), ("train.gradient_accumulation_steps", int),
+    ("train.logging_steps", int), ("train.save_steps", int),
+    ("train.save_total_limit", int), ("train.seed", int),
+    ("tuning.lora.r", int), ("tuning.lora.alpha", int), ("tuning.lora.dropout", float),
+    ("dataset.sources[].weight", float), ("dataset.sources[].max_samples", int),
+    ("grpo.num_generations", int), ("grpo.max_completion_length", int),
+    ("grpo.num_iterations", int), ("grpo.temperature", float), ("grpo.top_p", float),
+    ("grpo.beta", float), ("grpo.vllm_gpu_memory_utilization", float),
+    ("grpo.rewards[].weight", float), ("grpo.rewards[].target_length", float),
+]
+
+
+def coerce_numeric(cfg: dict) -> dict:
+    """Cast numeric-looking config leaves, failing loudly at load time."""
+
+    def walk(node, parts: list[str], trail: str, caster):
+        if node is None:
+            return
+        head, rest = parts[0], parts[1:]
+        if head.endswith("[]"):
+            key = head[:-2]
+            seq = node.get(key) if isinstance(node, dict) else None
+            for i, item in enumerate(seq or []):
+                walk(item, rest, f"{trail}.{key}[{i}]", caster)
+            return
+        if not isinstance(node, dict) or head not in node:
+            return
+        if rest:
+            walk(node[head], rest, f"{trail}.{head}", caster)
+            return
+        val = node[head]
+        if val is None or isinstance(val, bool):
+            return
+        try:
+            node[head] = caster(float(val)) if caster is int else caster(val)
+        except (TypeError, ValueError):
+            raise SystemExit(
+                f"[x] {trail.lstrip('.')}.{head} must be a number, got "
+                f"{type(val).__name__} {val!r}.\n"
+                "    If this came from YAML, exponent notation needs a decimal "
+                "point: write 1.0e-5, not 1e-5."
+            ) from None
+
+    for path, caster in NUMERIC_FIELDS:
+        walk(cfg, path.split("."), "", caster)
+    return cfg
 
 
 def build_rewards(cfg: dict) -> tuple[list[Callable], list[float]]:

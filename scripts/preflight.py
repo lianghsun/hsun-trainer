@@ -177,12 +177,16 @@ def advise(d: dict) -> list[str]:
         out.append(f"{WARN} Gated datasets and push_to_hub will fail without it")
 
     if d["uv"] == "not found":
-        out.append(f"{BAD} uv not found -> install from https://docs.astral.sh/uv/")
+        # uv builds the script environments; it is not needed to run inside one.
+        # Invoking a script through its own interpreter is a documented pattern,
+        # and uv is often absent from that PATH - not an error.
+        out.append(f"{WARN} uv not on PATH - fine inside an existing script env; "
+                   f"needed to create one (https://docs.astral.sh/uv/)")
     else:
         out.append(f"{OK} uv {d['uv']}")
 
     if d["hf_cli"] == "not found":
-        out.append(f"{WARN} `hf` CLI not found -> needed for HF Jobs (`pip install -U huggingface_hub`)")
+        out.append(f"{WARN} `hf` CLI not on PATH -> only needed for HF Jobs and gated logins")
 
     if d["disk_free_gb"] < 100:
         out.append(
