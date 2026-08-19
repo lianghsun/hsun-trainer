@@ -78,11 +78,12 @@ SFT_CFG='{"stage":"sft","model":{"name_or_path":"google/gemma-3-1b-it","dtype":"
  "train":{"output_dir":"/home/liang/out/live_sft","report_to":["trackio"],"project":"hsun-trainer-demo","max_length":1024,"packing":false,"bf16":true,
    "gradient_checkpointing":true,"per_device_train_batch_size":2,"gradient_accumulation_steps":1,
    "max_steps":20,"logging_steps":2,"save_strategy":"no","save_final_model":false}}'
+# max_completion_length is deliberately 256: too small for this model, so the
+# clipped-ratio guard fires and halts the stage. That is what this stage shows.
+# Raise it to watch GRPO actually train (needs more VRAM than a 3090 has here).
 GRPO_CFG='{"stage":"grpo","model":{"name_or_path":"google/gemma-3-1b-it","dtype":"bfloat16","attn_implementation":"sdpa"},
  "dataset":{"sources":[{"path":"twinkle-ai/tw-math-reasoning-2k","split":"train","max_samples":64}]},
  "grpo":{"dataset_kind":"math","question_field":"problem_zhtw","ground_truth_field":"answer",
-   # 256 is deliberately too small: it makes the clipped-ratio guard fire, which
-   # is the point of this stage. Raise to 3072 to watch GRPO actually train.
    "num_generations":4,"max_completion_length":256,
    "rewards":[{"name":"accuracy_math","weight":3.0},{"name":"format_boxed","weight":0.5},{"name":"zhtw_purity","weight":1.0}]},
  "tuning":{"method":"lora","lora":{"r":16,"alpha":32,"dropout":0.0,"target_modules":"all-linear"}},
