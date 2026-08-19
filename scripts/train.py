@@ -9,6 +9,7 @@
 #   "accelerate>=1.10",
 #   "huggingface-hub>=0.34",
 #   "pyyaml>=6",
+#   "trackio>=0.4",
 #   "bitsandbytes>=0.45 ; platform_system == 'Linux'",
 #   "liger-kernel>=0.5 ; platform_system == 'Linux'",
 # ]

@@ -9,6 +9,7 @@
 #   "accelerate>=1.10",
 #   "huggingface-hub>=0.34",
 #   "pyyaml>=6",
+#   "trackio>=0.4",
 #   "math-verify>=0.7",
 #   "bitsandbytes>=0.45 ; platform_system == 'Linux'",
 # ]
