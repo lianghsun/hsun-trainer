@@ -55,7 +55,21 @@ Platform-specific wheels need markers (`bitsandbytes ... ; platform_system ==
 **3. `--config` must keep accepting path | https URL | raw JSON.** That is how
 a job carries its settings without a shared filesystem.
 
-**4. Every training script keeps `--smoke-test`.** It is the only cheap guard
+**4. Check that torch can actually see the GPU before training.**
+On a host whose driver predates the default torch build, `uv run` resolves a
+CUDA version the driver cannot load, `torch.cuda.is_available()` is False, and
+training silently falls back to CPU. `train.py` and `train_grpo.py` abort on
+this and print the fix. Where a script environment has already been patched,
+invoke it directly rather than through `uv run`, which would undo the patch:
+
+```bash
+"$(uv python find --script scripts/train.py)" scripts/train.py --config <recipe>
+```
+
+`uv run` remains correct on any host whose driver matches. See
+`references/troubleshooting.md`.
+
+**5. Every training script keeps `--smoke-test`.** It is the only cheap guard
 against wasting GPU hours, and it is what caught the `warmup_ratio` removal.
 
 ## Verified facts — do not "fix" these from memory
