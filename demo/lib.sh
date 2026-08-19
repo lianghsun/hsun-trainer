@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Presentation helpers for the hsun-trainer stage demos.
+#
+# The visual grammar (prompt -> tool call -> indented result) mirrors how an
+# agent session reads, because that is the shape of the work. This is a
+# scripted replay, not a live agent, and the header says so - every command
+# below really runs and every number on screen is its real output.
+
+export PATH="$HOME/.local/bin:$PATH" HF_HOME="$HOME/hf-cache" TMPDIR="$HOME/tmp"
+cd ~/hsun-trainer 2>/dev/null || cd "$(dirname "$0")/.." || exit 1
+
+PY="$(uv python find --script scripts/train.py 2>/dev/null)"
+PYG="$(uv python find --script scripts/train_grpo.py 2>/dev/null)"
+
+R=$'\033[0m'; B=$'\033[1m'; D=$'\033[2m'
+ORANGE=$'\033[38;5;179m'; GREEN=$'\033[38;5;71m'; BLUE=$'\033[38;5;110m'
+RED=$'\033[38;5;167m'; GREY=$'\033[38;5;245m'
+
+PACE=${PACE:-1}                       # PACE=0 removes all pauses (for retakes)
+pause() { [ "$PACE" = "0" ] || sleep "${1:-1}"; }
+
+# Typewriter, so the ask lands as something a person said
+say() {
+  printf "\n${B}> ${R}"
+  local s="$1" i
+  for ((i=0; i<${#s}; i++)); do
+    printf "%s" "${s:i:1}"
+    [ "$PACE" = "0" ] || sleep 0.022
+  done
+  printf "\n"
+  pause 1.2
+}
+
+banner() {
+  clear
+  printf "${ORANGE}╭──────────────────────────────────────────────────────────────╮${R}\n"
+  printf "${ORANGE}│${R}  ${B}hsun-trainer${R}  ·  %-40s${ORANGE}│${R}\n" "$1"
+  printf "${ORANGE}╰──────────────────────────────────────────────────────────────╯${R}\n"
+  printf "${D}  scripted replay · every command below really runs${R}\n"
+}
+
+# step "narration"  -- what this step is for, in the speaker's words
+step() { printf "\n${ORANGE}⏺${R} ${B}%s${R}\n" "$1"; pause 0.7; }
+
+# run "label" cmd...  -- show the call, run it, indent the output
+run() {
+  local label="$1"; shift
+  printf "  ${D}⎿${R}  ${BLUE}%s${R}\n" "$label"
+  pause 0.4
+  "$@" 2>&1 | sed "s/^/     ${GREY}/;s/\$/${R}/"
+}
+
+# note "text"  -- the conclusion a human would draw from what just printed
+note() { printf "\n     ${GREEN}▸${R} %s\n" "$1"; pause 1.4; }
+warn() { printf "\n     ${RED}▸${R} %s\n" "$1"; pause 1.4; }
+
+done_banner() {
+  printf "\n${GREEN}  ✓ %s${R}   ${D}%s${R}\n\n" "$1" "${2:-}"
+}
