@@ -25,7 +25,7 @@ run_stage "train.py --stage cpt" \
  "model":{"name_or_path":"google/gemma-3-1b-pt","dtype":"bfloat16","attn_implementation":"sdpa"},
  "dataset":{"sources":[{"path":"lianghsun/tw-legal-qa-3M","split":"train","keep":["text"],"max_samples":2000}]},
  "tuning":{"method":"full"},
- "train":{"output_dir":"/home/liang/out/demo_pt","max_length":1024,"packing":true,"bf16":true,
+ "train":{"output_dir":"/home/liang/out/demo_pt","report_to":["trackio"],"max_length":1024,"packing":true,"bf16":true,
    "gradient_checkpointing":true,"per_device_train_batch_size":2,"gradient_accumulation_steps":1,
    "max_steps":20,"logging_steps":5,"save_strategy":"no","save_final_model":false}}'
 

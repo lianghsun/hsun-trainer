@@ -22,7 +22,7 @@ run_stage "train.py --stage sft" \
  "dataset":{"sources":[{"path":"twinkle-ai/tw-reasoning-instruct-50k","split":"train",
    "sharegpt_to_messages":true,"sharegpt_column":"conversations","keep":["messages"],"max_samples":2000}]},
  "tuning":{"method":"full"},
- "train":{"output_dir":"/home/liang/out/demo_sft","max_length":1024,"packing":false,"bf16":true,
+ "train":{"output_dir":"/home/liang/out/demo_sft","report_to":["trackio"],"max_length":1024,"packing":false,"bf16":true,
    "gradient_checkpointing":true,"per_device_train_batch_size":2,"gradient_accumulation_steps":1,
    "max_steps":20,"logging_steps":5,"save_strategy":"no","save_final_model":false}}'
 
