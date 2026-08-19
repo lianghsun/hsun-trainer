@@ -141,17 +141,36 @@ def lora_params(facts: dict, rank: int) -> float:
 
 
 def activations(facts: dict, batch: int, seq: int, ckpt: bool) -> float:
+    """Activation memory, driven by total tokens rather than batch and seq apart.
+
+    Confirmed by measurement: batch 1 x seq 4096 and batch 2 x seq 2048 both
+    peak at 4.4 GB, so only the product matters.
+    """
     h, l = facts["hidden"], facts["layers"]
-    per_layer_input = batch * seq * h * 2
+    tokens = batch * seq
     if ckpt:
-        # Boundary inputs kept + one block recomputed at a time.
-        return per_layer_input * l + per_layer_input * 12
-    return per_layer_input * l * 12
+        # Layer-boundary inputs kept, plus one block recomputed at a time.
+        return tokens * h * 2 * (l + 12)
+    return tokens * h * 2 * l * 12
 
 
 def logits_mem(facts: dict, batch: int, seq: int) -> float:
-    """Logits are upcast to fp32 for the loss; softmax needs a second copy."""
-    return batch * seq * facts["vocab"] * 4 * 2
+    """Zero, deliberately.
+
+    The classic estimate is batch x seq x vocab x 4 bytes for an fp32 logits
+    tensor. Measured against transformers 5 that term does not appear: on
+    gemma-3-1b (vocab 262,144) it predicts 16 GB at batch 4 / seq 2048 while
+    the run peaks at 4.6 GB in total, and quadrupling the sequence adds only
+    0.2 GB. The loss is chunked, so full logits are never materialised. Kept
+    as a function so the assumption stays visible if that changes again.
+    """
+    return 0.0
+
+
+# Empirical: CUDA context, cuBLAS workspaces, allocator fragmentation and (for
+# LoRA) the PEFT wrappers. Fitted to RTX 3090 runs; LoRA consistently carries
+# ~1.5 GB more of it than full fine-tuning.
+OVERHEAD_GB = {"full": 0.5, "lora": 2.0, "qlora": 2.0}
 
 
 def plan(facts: dict, batch: int, seq: int, rank: int, ckpt: bool, gpus: int) -> list[dict]:
@@ -161,45 +180,29 @@ def plan(facts: dict, batch: int, seq: int, rank: int, ckpt: bool, gpus: int) ->
     a = lora_params(facts, rank)
     rows = []
 
-    # Full FT, bf16 mixed precision + AdamW: 2P weights, 2P grads, 4P fp32 master, 8P moments.
-    full_static = 2 * p + 2 * p + 4 * p + 8 * p
-    rows.append({
-        "method": "full",
-        "trainable": p,
-        "static": full_static,
-        "act": act,
-        "logits": logits,
-        "shardable": full_static * 0.75,  # ZeRO-3 shards grads + optimizer + params
-    })
+    # These scripts load in bf16 and train in pure bf16, so there is no fp32
+    # master copy: 2 B weights + 2 B grads + 4 B Adam moments per parameter.
+    # Classic mixed precision would add 4 B master + 4 B moments on top.
+    full_static = 8 * p
+    rows.append({"method": "full", "trainable": p, "static": full_static, "act": act,
+                 "logits": logits, "overhead": OVERHEAD_GB["full"] * GB,
+                 "shardable": full_static * 0.75})
 
-    # LoRA: frozen bf16 base + optimizer state on adapters only.
-    lora_static = 2 * p + 2 * a + 4 * a + 8 * a
-    rows.append({
-        "method": f"lora(r={rank})",
-        "trainable": a,
-        "static": lora_static,
-        "act": act,
-        "logits": logits,
-        "shardable": (lora_static - 2 * p) * 0.75,
-    })
+    lora_static = 2 * p + 6 * a
+    rows.append({"method": f"lora(r={rank})", "trainable": a, "static": lora_static,
+                 "act": act, "logits": logits, "overhead": OVERHEAD_GB["lora"] * GB,
+                 "shardable": (lora_static - 2 * p) * 0.75})
 
-    # QLoRA: NF4 base (~0.5 bytes/param + quant constants) + adapters in bf16.
-    qlora_static = 0.55 * p + 2 * a + 4 * a + 8 * a
-    rows.append({
-        "method": f"qlora(r={rank})",
-        "trainable": a,
-        "static": qlora_static,
-        "act": act,
-        "logits": logits,
-        "shardable": 0.0,
-    })
+    qlora_static = 0.55 * p + 6 * a
+    rows.append({"method": f"qlora(r={rank})", "trainable": a, "static": qlora_static,
+                 "act": act, "logits": logits, "overhead": OVERHEAD_GB["qlora"] * GB,
+                 "shardable": 0.0})
 
     for r in rows:
-        total = r["static"] + r["act"] + r["logits"]
+        total = r["static"] + r["act"] + r["logits"] + r["overhead"]
         r["total_gb"] = total / GB
-        r["per_gpu_gb"] = (
-            (total - r["shardable"] * (1 - 1 / gpus)) / GB if gpus > 1 else total / GB
-        )
+        r["per_gpu_gb"] = ((total - r["shardable"] * (1 - 1 / gpus)) / GB
+                           if gpus > 1 else total / GB)
     return rows
 
 
@@ -233,23 +236,21 @@ def main() -> int:
         f"gpus {args.gpus} | base dtype {facts['dtype']}"
     )
     print("-" * 74)
-    print(f"{'method':<14}{'trainable':>12}{'weights+opt':>13}{'acts':>9}{'logits':>9}{'PEAK/GPU':>13}")
+    print(f"{'method':<14}{'trainable':>12}{'weights+opt':>13}{'acts':>9}{'overhead':>10}{'PEAK/GPU':>12}")
     print("-" * 74)
     for r in rows:
         tr = f"{r['trainable']/1e6:.0f} M" if r["trainable"] < 1e9 else f"{r['trainable']/1e9:.2f} B"
         print(
             f"{r['method']:<14}{tr:>12}{r['static']/GB:>11.1f}G"
-            f"{r['act']/GB:>8.1f}G{r['logits']/GB:>8.1f}G{r['per_gpu_gb']:>11.1f}G"
+            f"{r['act']/GB:>8.1f}G{r['overhead']/GB:>9.1f}G{r['per_gpu_gb']:>11.1f}G"
         )
     print("-" * 74)
 
-    if r["logits"] / GB > 2:
-        print(
-            f"[!] Logits alone need {rows[0]['logits']/GB:.1f} GB "
-            f"(vocab {facts['vocab']:,} x seq {args.seq_len} x batch {args.batch}, fp32).\n"
-            f"    Cut per-device batch to 1 and raise gradient_accumulation_steps, or\n"
-            f"    enable `use_liger_kernel=True` for a fused chunked cross-entropy."
-        )
+    print(
+        "estimate, not a measurement: fitted to RTX 3090 runs of gemma-3-1b and\n"
+        "accurate there to within 0.2 GB. Confirm the real number with\n"
+        "--smoke-test, which prints the peak the shape actually reached."
+    )
 
     if args.vram:
         print(f"\nAgainst {args.vram} GB/GPU:")
@@ -261,7 +262,7 @@ def main() -> int:
                 chosen = r
         print()
         if chosen:
-            print(f"  -> recommended: {chosen['method']}")
+            print(f"  -> cheapest that fits: {chosen['method']}")
         else:
             print(
                 "  -> nothing fits. Options: shorter seq_len, more GPUs with ZeRO-3,\n"

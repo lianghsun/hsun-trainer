@@ -10,40 +10,52 @@ uv run scripts/plan_memory.py --model google/gemma-3-12b-it \
 
 ## Choosing a tuning method
 
-`plan_memory.py` models weights + gradients + optimizer + activations + the
-logits tensor. Rough per-GPU peaks at seq 4096, batch 1, gradient checkpointing:
+`plan_memory.py` models static memory (weights + gradients + optimizer),
+activations, and a fitted overhead term. Per-GPU peaks at seq 4096, batch 1,
+gradient checkpointing, pure bf16:
 
 | Model | full FT | LoRA r=32 | QLoRA r=32 |
 |---|---|---|---|
-| ~1 B | ~18 GB | ~6 GB | ~4 GB |
-| ~4 B | ~65 GB | ~14 GB | ~8 GB |
-| ~12 B | ~190 GB | ~33 GB | ~16 GB |
-| ~27 B | ~430 GB | ~66 GB | ~26 GB |
+| gemma-3-1b | 8.3 GB | 4.3 GB | 3.0 GB |
+| gemma-3-4b | 33.4 GB | 11.3 GB | 5.5 GB |
+| gemma-3-12b | 93.1 GB | 27.2 GB | 10.7 GB |
+| gemma-3-27b | 207.9 GB | 57.4 GB | 20.4 GB |
 
-Full fine-tuning costs roughly **16 bytes per parameter** (2 weights + 2
-gradients + 4 fp32 master + 8 Adam moments), which is why a 12B full FT does
-not fit on a single 80 GB card without sharding or offload.
+Full fine-tuning costs about **8 bytes per parameter**: 2 weights +
+2 gradients + 4 Adam moments, all bf16. That is half the textbook figure,
+because loading in bf16 and training in pure bf16 skips the fp32 master copy
+classic mixed precision keeps. Loading in fp32 and relying on autocast would
+restore the 16 bytes.
 
 Decision order: full FT if it fits (best quality, required for real CPT) →
 LoRA → QLoRA → shard across GPUs → HF Jobs.
 
-## The logits trap
+### Calibration
 
-Gemma's vocabulary is ~262K entries. The loss upcasts logits to fp32:
+The estimator is fitted, not derived. Measured on an RTX 3090 with
+`gemma-3-1b-it`, packing on so every sequence is exactly `max_length`:
 
-```
-batch × seq_len × vocab × 4 bytes × 2 (softmax copy)
-1 × 8192 × 262144 × 4 × 2  ≈  17 GB
-```
+| tokens (batch x seq) | method | measured | estimate |
+|---|---|---|---|
+| 1 x 1024 | LoRA | 4.2 GB | 4.1 GB |
+| 1 x 2048 | LoRA | 4.2 GB | 4.2 GB |
+| 1 x 4096 | LoRA | 4.4 GB | 4.4 GB |
+| 2 x 2048 | LoRA | 4.4 GB | 4.4 GB |
+| 8 x 2048 | LoRA | 5.6 GB | 5.4 GB |
+| 1 x 2048 | full | 8.3 GB | 8.3 GB |
 
-That single tensor can dwarf the model. It scales with **batch × seq_len**,
-not parameters, so:
+Two things that table settles:
 
-- keep `per_device_train_batch_size: 1` and raise `gradient_accumulation_steps`
-- set `use_liger_kernel: true` (Linux/CUDA) for fused chunked cross-entropy
-- shorten `max_length` to the p99 from `inspect_dataset.py`
+- **Only the token count matters.** 1 x 4096 and 2 x 2048 peak identically, so
+  trading batch size for sequence length buys nothing.
+- **Large vocabularies no longer blow up memory.** The classic warning — that
+  an fp32 logits tensor of `batch x seq x vocab` dominates everything — does
+  not hold under transformers 5, which chunks the loss. For gemma-3-1b
+  (vocab 262,144) that term predicts 16 GB at batch 4 / seq 2048; the run
+  peaks at 4.6 GB in total. `plan_memory.py` models it as zero.
 
-This is the most common OOM that looks inexplicable.
+Confirm with `--smoke-test`, which prints the peak actually reached. These
+numbers were verified on one GPU and one model family only.
 
 ## Multi-GPU on your own box
 
