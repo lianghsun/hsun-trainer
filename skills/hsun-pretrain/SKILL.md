@@ -69,7 +69,7 @@ Until a prebuilt kernel exists for your GPU, choose deliberately: keep
 `packing: true` and accept the contamination, or set `packing: false` and pay
 the throughput. Do not leave it undecided.
 
-**Learning rate 5-10x below SFT.** 1e-5 or lower for full fine-tuning. CPT at
+**Learning rate 5-10x below SFT.** 1e-5 or lower when updating all parameters. CPT at
 SFT learning rates is the most common way to destroy a base model. Warm up
 over ~100 steps and use a cosine schedule.
 
@@ -91,7 +91,10 @@ Set these with `weight` on each source; sources are interleaved with
 `stopping_strategy="all_exhausted"`, so weights are sampling probabilities,
 not row counts.
 
-**Full fine-tuning, not LoRA.** LoRA absorbs style well and new knowledge
+**Update all parameters, not LoRA.** These are two independent axes: CPT names
+the *objective* (next-token prediction over raw text), while full vs LoRA names
+*which weights move*. CPT is pretraining, not fine-tuning — the recipe just
+happens to set `tuning.method: full`. LoRA absorbs style well and new knowledge
 poorly. If VRAM forces LoRA, use a high rank (128+) and expect less knowledge
 transfer. Only add `modules_to_save: [embed_tokens, lm_head]` if you actually
 changed the tokenizer — it is expensive and usually unnecessary, since Gemma's
