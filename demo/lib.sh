@@ -57,3 +57,32 @@ warn() { printf "\n     ${RED}▸${R} %s\n" "$1"; pause 1.4; }
 done_banner() {
   printf "\n${GREEN}  ✓ %s${R}   ${D}%s${R}\n\n" "$1" "${2:-}"
 }
+
+# Run a training stage and remember whether it worked. Narration that claims a
+# result must never print when the stage failed - a script that says "✓ done"
+# over an OOM traceback is the exact failure this project exists to catch.
+STAGE_OK=0
+run_stage() {
+  local label="$1"; shift
+  printf "  ${D}⎿${R}  ${BLUE}%s${R}\n\n" "$label"
+  set -o pipefail
+  "$@" 2>&1 \
+    | grep -vE "^(Generating|Loading weights|Packing|Adding EOS|Truncating|Tokenizing|Map:)" \
+    | sed "s/^/     /"
+  local rc=${PIPESTATUS[0]}
+  set +o pipefail
+  STAGE_OK=$([ "$rc" -eq 0 ] && echo 1 || echo 0)
+  return 0
+}
+
+# ok "text" -- only prints when the stage actually succeeded
+ok() { [ "$STAGE_OK" = "1" ] && note "$1"; }
+
+fail_banner() {
+  printf "\n${RED}  ✗ %s${R}\n" "$1"
+  printf "${D}     %s${R}\n\n" "${2:-}"
+}
+
+stage_verdict() {
+  if [ "$STAGE_OK" = "1" ]; then done_banner "$1" "$2"; else fail_banner "$1 失敗" "$3"; fi
+}

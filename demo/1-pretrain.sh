@@ -20,17 +20,15 @@ run "plan_memory.py --model gemma-3-1b-pt" \
 note "1B 全參數只要 8 GB — 放得下就不必用 LoRA"
 
 step "開始訓練 · 全參數 · 20 步"
-printf "  ${D}⎿${R}  ${BLUE}train.py --stage cpt${R}\n\n"
-"$PY" scripts/train.py --config '{"stage":"cpt",
+run_stage "train.py --stage cpt" \
+  "$PY" scripts/train.py --config '{"stage":"cpt",
  "model":{"name_or_path":"google/gemma-3-1b-pt","dtype":"bfloat16","attn_implementation":"sdpa"},
  "dataset":{"sources":[{"path":"lianghsun/tw-legal-qa-3M","split":"train","keep":["text"],"max_samples":2000}]},
  "tuning":{"method":"full"},
  "train":{"output_dir":"/home/liang/out/demo_pt","max_length":1024,"packing":true,"bf16":true,
    "gradient_checkpointing":true,"per_device_train_batch_size":2,"gradient_accumulation_steps":1,
-   "max_steps":20,"logging_steps":5,"save_strategy":"no","save_final_model":false}}' 2>&1 \
- | grep -vE "^(Generating|Loading weights|Packing|Adding EOS|Truncating|Tokenizing)" \
- | sed "s/^/     /"
+   "max_steps":20,"logging_steps":5,"save_strategy":"no","save_final_model":false}}'
 
-note "loss 有下降，峰值 8.3 GB — 跟預估的 8.1 差 0.2"
-warn "但它現在不會聊天了：CPT 只教知識，沒教怎麼回答。下一步是 SFT。"
-done_banner "CPT 完成" "接著跑 ./2-sft.sh"
+ok "loss 有下降，峰值 8.3 GB — 跟預估的 8.1 差 0.2"
+ok "但它現在不會聊天了：CPT 只教知識，沒教怎麼回答。下一步是 SFT。"
+stage_verdict "CPT" "接著跑 ./2-sft.sh" "先檢查 GPU 有沒有殘留行程：nvidia-smi --query-compute-apps=pid,used_memory --format=csv"

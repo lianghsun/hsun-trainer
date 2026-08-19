@@ -16,18 +16,16 @@ printf "  ${D}⎿${R}  ${BLUE}sharegpt_to_messages: true${R}\n"
 pause 1.2
 
 step "開始訓練 · 全參數 · 20 步"
-printf "  ${D}⎿${R}  ${BLUE}train.py --stage sft${R}\n\n"
-"$PY" scripts/train.py --config '{"stage":"sft",
+run_stage "train.py --stage sft" \
+  "$PY" scripts/train.py --config '{"stage":"sft",
  "model":{"name_or_path":"google/gemma-3-1b-it","dtype":"bfloat16","attn_implementation":"sdpa"},
  "dataset":{"sources":[{"path":"twinkle-ai/tw-reasoning-instruct-50k","split":"train",
    "sharegpt_to_messages":true,"sharegpt_column":"conversations","keep":["messages"],"max_samples":2000}]},
  "tuning":{"method":"full"},
  "train":{"output_dir":"/home/liang/out/demo_sft","max_length":1024,"packing":false,"bf16":true,
    "gradient_checkpointing":true,"per_device_train_batch_size":2,"gradient_accumulation_steps":1,
-   "max_steps":20,"logging_steps":5,"save_strategy":"no","save_final_model":false}}' 2>&1 \
- | grep -vE "^(Generating|Loading weights|Adding EOS|Truncating|Tokenizing|Map:)" \
- | sed "s/^/     /"
+   "max_steps":20,"logging_steps":5,"save_strategy":"no","save_final_model":false}}'
 
-note "2000 筆全部存活 — 轉換對了；沒開旗標的話這裡會是 0"
-note "跟 CPT 的差別：模型換成 -it、資料是對話、而且套了 chat template"
-done_banner "SFT 完成" "接著跑 ./3-eval.sh"
+ok "2000 筆全部存活 — 轉換對了；沒開旗標的話這裡會是 0"
+ok "跟 CPT 的差別：模型換成 -it、資料是對話、而且套了 chat template"
+stage_verdict "SFT" "接著跑 ./3-eval.sh" "先檢查 GPU 殘留行程"
