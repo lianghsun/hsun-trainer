@@ -32,8 +32,7 @@ skills share them. SKILL.md files reference them as `scripts/<name>.py`.
 /plugin install hsun-trainer@hsun-trainer
 ```
 
-The repo is **private**, so only the owner and collaborators can install it
-until `gh repo edit --visibility public`.
+The repo is public, so this works for anyone.
 
 Then users ask in natural language ("用 tw-reasoning-instruct-50k 對 Gemma 做
 SFT", "跑 Formosa-bench 評測") and the router skill dispatches. The core loop
@@ -75,6 +74,8 @@ Checked by execution against **TRL 1.10 / transformers 5.15** (Aug 2026):
 | `AutoModelForCausalLM` on multimodal Gemma | works (maps to `Gemma*ForConditionalGeneration`) |
 | `all-linear` on `gemma-3-4b` | targets 401 Linears, 162 in the vision tower |
 | `lianghsun/tw-legal-qa-chat`, `reasoning-base-20k-chat` | `messages` is a **JSON string** → TRL silently trains on 0 rows |
+| `yaml.safe_load("lr: 1e-5")` | returns the **string** `"1e-5"`; only `1.0e-5` parses as a float |
+| `plan_memory` fit | assumes `gradient_accumulation_steps: 1`; accum 16 measured +1.8 GB |
 | `twinkle-ai/fineweb-zhtw-filtered`, `finepdfs-zhtw`, `finetranslations-zhtw` | empty repos, no data files |
 | `gemma-3-4b/12b/27b` `config.json` | omits `vocab_size` — only `gemma-3-270m` publishes it |
 

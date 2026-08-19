@@ -217,6 +217,9 @@ def main() -> int:
     ap.add_argument("--vram", type=float, default=None, help="VRAM per GPU in GB")
     ap.add_argument("--vocab", type=int, default=None,
                     help="override vocabulary size when the repo publishes neither")
+    ap.add_argument("--grad-accum", type=int, default=1,
+                    help="gradient_accumulation_steps; >1 raises the measured peak "
+                         "and is NOT modelled (see the note printed below)")
     ap.add_argument("--no-grad-ckpt", action="store_true", help="disable gradient checkpointing")
     args = ap.parse_args()
 
@@ -247,10 +250,18 @@ def main() -> int:
     print("-" * 74)
 
     print(
-        "estimate, not a measurement: fitted to RTX 3090 runs of gemma-3-1b and\n"
-        "accurate there to within 0.2 GB. Confirm the real number with\n"
-        "--smoke-test, which prints the peak the shape actually reached."
+        "estimate, not a measurement: fitted to RTX 3090 runs of gemma-3-1b at\n"
+        "gradient_accumulation_steps=1, accurate there to within 0.2 GB.\n"
+        "Confirm with --smoke-test, which prints the peak actually reached."
     )
+    if args.grad_accum > 1:
+        # Controlled measurement, gemma-3-1b full FT, seq 1024 x batch 2, packed:
+        # accum 1 -> 8.3 GB, accum 16 -> 10.1 GB. Same shape, only this changed.
+        print(
+            f"\n[!] gradient_accumulation_steps={args.grad_accum} is NOT in the model.\n"
+            "    Measured on gemma-3-1b full FT: accum 1 = 8.3 GB, accum 16 = 10.1 GB\n"
+            "    (+1.8 GB, same shape otherwise). Budget headroom accordingly."
+        )
 
     if args.vram:
         print(f"\nAgainst {args.vram} GB/GPU:")

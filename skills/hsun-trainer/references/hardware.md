@@ -54,6 +54,11 @@ Two things that table settles:
   (vocab 262,144) that term predicts 16 GB at batch 4 / seq 2048; the run
   peaks at 4.6 GB in total. `plan_memory.py` models it as zero.
 
+**The fit assumes `gradient_accumulation_steps: 1`.** Accumulation is not
+modelled and raises the real peak: same shape, gemma-3-1b full FT at seq 1024 x
+batch 2, accum 1 peaks at 8.3 GB while accum 16 peaks at 10.1 GB. Since recipes
+routinely set accumulation to 16 or 32, leave headroom or measure.
+
 Confirm with `--smoke-test`, which prints the peak actually reached. These
 numbers were verified on one GPU and one model family only.
 
