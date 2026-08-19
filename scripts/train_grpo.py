@@ -563,6 +563,65 @@ def sh_driver_cuda() -> str | None:
     return m.group(1) if m else None
 
 
+
+def make_clipped_ratio_guard(patience: int = 3):
+    """Stop a GRPO run that cannot learn from looking like one that did.
+
+    `mask_truncated_completions` (on by default, and correct) drops every
+    completion that hit `max_completion_length`. When that cap sits below what
+    the model naturally emits, *every* completion is dropped: loss and
+    grad_norm are exactly 0, no gradient flows, and the run still finishes and
+    reports a train_loss near zero -- the mean of those zeros, not
+    convergence. Measured on gemma-3-1b / tw-math-reasoning-2k, caps of 256,
+    384 and 1024 all sit at clipped_ratio 1.0.
+
+    Built lazily so this module keeps importing with only the standard library.
+    """
+    from transformers import TrainerCallback
+
+    class ClippedRatioGuard(TrainerCallback):
+        def __init__(self):
+            self.streak = 0
+            self.fired = False
+
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            if not logs or self.fired:
+                return
+            ratio = logs.get("completions/clipped_ratio")
+            if ratio is None:
+                return
+            try:
+                hit = float(ratio) >= 0.999
+            except (TypeError, ValueError):
+                return
+            self.streak = self.streak + 1 if hit else 0
+            if self.streak < patience:
+                return
+            self.fired = True
+            cap = getattr(args, "max_completion_length", "?")
+            print(
+                f"\n[x] Every completion truncated for {self.streak} logged steps "
+                f"(completions/clipped_ratio = 1.0).\n"
+                f"    mask_truncated_completions drops all of them, so loss and "
+                f"grad_norm are 0\n"
+                f"    and this run is learning nothing. The final train_loss will "
+                f"still look small -\n"
+                f"    it is the mean of those zeros.\n\n"
+                f"    grpo.max_completion_length = {cap} is below what the model "
+                f"emits. Size it\n"
+                f"    from the data and set it above the p99 of the reference "
+                f"answers:\n"
+                f"      uv run scripts/inspect_dataset.py <dataset> --tokenizer <model>\n"
+                f"    or set grpo.mask_truncated_completions: false to train on "
+                f"truncated ones.\n"
+                f"    HSUN_ALLOW_ALL_CLIPPED=1 continues anyway."
+            )
+            if not os.environ.get("HSUN_ALLOW_ALL_CLIPPED"):
+                control.should_training_stop = True
+
+    return ClippedRatioGuard()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="GRPO trainer with zh-TW rewards")
     ap.add_argument("--config", help="YAML path, https URL, or raw JSON")
@@ -682,6 +741,7 @@ def main() -> int:
         processing_class=tok,
         peft_config=peft_cfg,
     )
+    trainer.add_callback(make_clipped_ratio_guard())
     result = trainer.train()
     print(f"    loss={result.training_loss:.4f}  steps={result.global_step}")
 

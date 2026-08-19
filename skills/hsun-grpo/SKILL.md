@@ -97,7 +97,7 @@ Set `choice_fields: [A, B, C, D, E]` for
 | `num_generations` | 8-16. Below 4 the group advantage is too noisy |
 | `per_device_train_batch_size` | must be divisible by `num_generations` |
 | `learning_rate` | 1e-6 to 5e-6 — far lower than SFT |
-| `max_completion_length` | long enough for full reasoning, or truncation looks like failure |
+| `max_completion_length` | **above the p99 of the reference answers.** Too low and every completion is truncated, `mask_truncated_completions` drops all of them, and the run reports success having learned nothing |
 | `mask_truncated_completions` | `true`, so cut-off answers are not rewarded |
 | `beta` | KL coefficient; TRL 1.10 defaults to `0.0` (off). Raise to 0.01-0.04 if the model drifts from its SFT behaviour |
 | `use_vllm` + `vllm_mode: colocate` | large speedup; generation dominates GRPO wall-clock |
@@ -105,6 +105,37 @@ Set `choice_fields: [A, B, C, D, E]` for
 TRL 1.10 API notes: `scale_rewards` is a **string** (`"group"`/`"batch"`/
 `"none"`), `loss_type` defaults to `"dapo"`, and `max_prompt_length` was
 **removed** — do not pass it.
+
+## Sizing `max_completion_length`
+
+Measure it; do not guess. `inspect_dataset.py --tokenizer <model>` prints the
+percentiles of the reference answers:
+
+```bash
+uv run scripts/inspect_dataset.py twinkle-ai/tw-math-reasoning-2k \
+    --tokenizer google/gemma-3-1b-it
+```
+
+For `tw-math-reasoning-2k` the assistant answers run p50 ≈ 1.2 K, p99 ≈ 4.7 K
+tokens, so a 1B model needs **at least 2048** and comfortably 3072. Measured
+`completions/clipped_ratio` on gemma-3-1b:
+
+| `max_completion_length` | clipped_ratio | outcome |
+|---|---|---|
+| 256 | **1.0** | loss 0, grad_norm 0, every step — learns nothing |
+| 384 | **1.0** | same |
+| 1024 | **1.0** | same |
+| 3072 | — | ~5% of references truncated |
+
+The failure is silent: the run completes, exits 0, and prints a small
+`train_loss` that is just the mean of the zeros. `train_grpo.py` now stops with
+an explanation when `clipped_ratio` stays at 1.0 for three logged steps
+(`HSUN_ALLOW_ALL_CLIPPED=1` overrides).
+
+Watch `completions/clipped_ratio` in the logs on every run. Anything
+persistently above ~0.3 means the reward signal is being computed on a biased
+subset — the short answers — which pushes the model exactly the wrong way for a
+reasoning task.
 
 ## Reward hacking — what it looks like
 
